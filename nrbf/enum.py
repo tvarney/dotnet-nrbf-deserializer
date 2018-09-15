@@ -1,9 +1,9 @@
 
-from enum import IntEnum, unique
+import enum
 
 
-@unique
-class RecordType(IntEnum):
+@enum.unique
+class RecordType(enum.IntEnum):
     SerializedStreamHeader = 0
     ClassWithId = 1
     SystemClassWithMembers = 2
@@ -26,8 +26,27 @@ class RecordType(IntEnum):
     MethodReturn = 22
 
 
-@unique
-class BinaryType(IntEnum):
+@enum.unique
+class ClassDefinitionType(enum.IntEnum):
+    @staticmethod
+    def get(record_type: 'RecordType') -> 'ClassDefinitionType':
+        if (record_type == RecordType.ClassWithMembersAndTypes
+                or record_type == RecordType.SystemClassWithMembersAndTypes):
+            return ClassDefinitionType.Full
+        if record_type == RecordType.ClassWithMembers or record_type == RecordType.SystemClassWithMembers:
+            return ClassDefinitionType.Partial
+        if record_type == RecordType.ClassWithId:
+            return ClassDefinitionType.Reference
+        return ClassDefinitionType.NotClass
+
+    NotClass = 0
+    Reference = 1
+    Partial = 2
+    Full = 3
+
+
+@enum.unique
+class BinaryType(enum.IntEnum):
     Primitive = 0
     String = 1
     Object = 2
@@ -38,8 +57,8 @@ class BinaryType(IntEnum):
     PrimitiveArray = 7
 
 
-@unique
-class PrimitiveType(IntEnum):
+@enum.unique
+class PrimitiveType(enum.IntEnum):
     Boolean = 1
     Byte = 2
     Char = 3
@@ -59,8 +78,8 @@ class PrimitiveType(IntEnum):
     String = 18
 
 
-@unique
-class BinaryArrayType(IntEnum):
+@enum.unique
+class BinaryArrayType(enum.IntEnum):
     Single = 0
     Jagged = 1
     Rectangular = 2
@@ -69,8 +88,8 @@ class BinaryArrayType(IntEnum):
     RectangularOffset = 5
 
 
-@unique
-class MessageFlags(IntEnum):
+@enum.unique
+class MessageFlags(enum.IntEnum):
     NoArgs = 1 << 0
     ArgsInline = 1 << 1
     ArgsIsArray = 1 << 2
@@ -86,4 +105,3 @@ class MessageFlags(IntEnum):
     ReturnValueInArray = 1 << 12
     ExceptionInArray = 1 << 13
     GenericMethod = 1 << 14
-
