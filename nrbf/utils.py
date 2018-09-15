@@ -1,7 +1,7 @@
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import BinaryIO, Tuple
+    from typing import Any, BinaryIO, Tuple
 
 
 def encode_multi_byte_int(value: int) -> bytes:
@@ -121,3 +121,9 @@ def read_multi_byte_int(fp: 'BinaryIO') -> int:
 
     byte_str += fp.read(1)
     return decode_multi_byte_int(byte_str)[1]
+
+
+def move(instance: 'Any', requested_type: 'type') -> 'Any':
+    if type(instance) is requested_type:
+        return instance
+    return requested_type(instance)
