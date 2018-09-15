@@ -15,3 +15,5 @@ class Value(object, metaclass=ABCMeta):
     def __bytes__(self) -> bytes:
         raise NotImplementedError("{}::__bytes__() not implemented")
 
+    def __str__(self) -> str:
+        return repr(self)
