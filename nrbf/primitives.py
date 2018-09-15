@@ -4,7 +4,7 @@ import enum
 import struct
 
 import nrbf.enum
-import nrbf.utils
+import nrbf.utils as utils
 import nrbf.value
 
 import typing
@@ -332,7 +332,7 @@ class DateTime(Primitive):
 class Decimal(Primitive):
     @classmethod
     def read(cls, fp: 'BinaryIO') -> 'Decimal':
-        length = nrbf.utils.read_multi_byte_int(fp)
+        length = utils.read_multi_byte_int(fp)
         data = fp.read(length)
         return Decimal(data.decode('utf-8'))
 
@@ -465,7 +465,7 @@ class Decimal(Primitive):
                 raise ValueError("Invalid Decimal format")
             return Decimal.round(value)
         if value_type is bytes:
-            num_bytes, length = nrbf.utils.decode_multi_byte_int(value)
+            num_bytes, length = utils.decode_multi_byte_int(value)
             str_value = value[num_bytes:].decode('utf-8')
             if not Decimal.verify(str_value):
                 raise ValueError("Invalid Decimal format")
@@ -490,7 +490,7 @@ class Decimal(Primitive):
         return nrbf.enum.PrimitiveType.Decimal
 
     def __bytes__(self) -> bytes:
-        len_prefix = nrbf.utils.encode_multi_byte_int(len(self._value))
+        len_prefix = utils.encode_multi_byte_int(len(self._value))
         return len_prefix + self._value.encode('utf-8')
 
     def __repr__(self) -> str:
@@ -716,7 +716,7 @@ class Int64(Primitive):
 class String(Primitive):
     @classmethod
     def read(cls, fp: 'BinaryIO') -> 'String':
-        length = nrbf.utils.read_multi_byte_int(fp)
+        length = utils.read_multi_byte_int(fp)
         return String(fp.read(length).decode('utf-8'))
 
     @staticmethod
@@ -727,7 +727,7 @@ class String(Primitive):
         if value_type is String:
             return str(value)
         if value_type is bytes:
-            read, length = nrbf.utils.decode_multi_byte_int(value)
+            read, length = utils.decode_multi_byte_int(value)
             if len(value) != read + length:
                 raise ValueError("String expected {} bytes, got {}".format(read + length, len(value)))
             return value[read:].decode('utf-8')
@@ -750,7 +750,7 @@ class String(Primitive):
 
     def __bytes__(self) -> bytes:
         value = self._value.encode('utf-8')
-        length = nrbf.utils.encode_multi_byte_int(len(value))
+        length = utils.encode_multi_byte_int(len(value))
         return length + value
 
     def __repr__(self) -> str:
