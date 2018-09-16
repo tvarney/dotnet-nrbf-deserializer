@@ -31,7 +31,8 @@ if typing.TYPE_CHECKING:
 
     PrimitiveValue = Union[
         BooleanValue, ByteValue, CharValue, DateTimeValue, DecimalValue, DoubleValue, Int8Value, Int16Value,
-        Int32Value, Int64Value, SingleValue, StringValue, TimeSpanValue, UInt16Value, UInt32Value, UInt64Value
+        Int32Value, Int64Value, SingleValue, StringValue, TimeSpanValue, UInt16Value, UInt32Value, UInt64Value,
+        'Primitive'
     ]
 
 
