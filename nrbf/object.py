@@ -1,15 +1,20 @@
 
 from abc import ABCMeta
 
-import nrbf.enum
-from nrbf.value import Value
+import nrbf.enum as enums
+import nrbf.exceptions as exception
+import nrbf.primitives as primitive
+import nrbf.structures as structs
+import nrbf.utils as utils
+import nrbf.value
 
 import typing
 if typing.TYPE_CHECKING:
     from typing import BinaryIO, Dict, List, Tuple, Union
     from nrbf.enum import BinaryType, PrimitiveType
-
-    InfoType = Union[None, str, PrimitiveType]
+    from nrbf.primitives import Int32, Int32Value
+    from nrbf.structures import ExtraInfoType
+    from nrbf.value import Value
 
 
 class DataStore(object):
@@ -20,21 +25,25 @@ class DataStore(object):
         self._known_metadata = dict()  # type: Dict[Tuple[str, str], object]
 
 
-class Instance(Value, metaclass=ABCMeta):
-    def __init__(self, object_id: int) -> None:
-        self._object_id = object_id
+class Instance(nrbf.value.Value, metaclass=ABCMeta):
+    def __init__(self, object_id: 'Int32Value') -> None:
+        self._object_id = utils.move(object_id, primitive.Int32)  # type: Int32
 
     @property
     def object_id(self) -> int:
-        return self._object_id
+        return self._object_id.value
+
+    @object_id.setter
+    def object_id(self, new_object_id: 'Int32Value') -> None:
+        self._object_id.value = new_object_id
 
 
 class ArrayInstance(Instance, metaclass=ABCMeta):
-    def __init__(self, object_id: int) -> None:
+    def __init__(self, object_id: 'Int32Value') -> None:
         Instance.__init__(self, object_id)
 
 
-class ClassObject(Value):
+class ClassObject(nrbf.value.Value):
     SystemClass = -1
 
     def __init__(self, name: str, members: 'List[Member]', partial: bool, library: int=-1) -> None:
@@ -50,7 +59,6 @@ class ClassObject(Value):
         self._partial = bool(partial)
         self._library = int(library)
         self._lookup = dict()  # Dict[str, Member]
-        self._written = False
         for member in self._members:
             self._lookup[member.index] = member
 
@@ -86,11 +94,14 @@ class ClassObject(Value):
 
 
 class Member(object):
-    def __init__(self, index: int, name: str, bin_type: 'BinaryType', additional_info: 'InfoType') -> None:
+    def __init__(self, index: int, name: str, bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType') -> None:
+        if not structs.ExtraTypeInfo.validate(bin_type, extra_type_info):
+            raise exception.InvalidExtraInfoValue(extra_type_info, bin_type)
+
         self._index = int(index)
         self._name = str(name)
         self._binary_type = nrbf.enum.BinaryType(bin_type)
-        self._additional_info = additional_info
+        self._extra_info = extra_type_info
 
     @property
     def name(self) -> str:
@@ -105,8 +116,8 @@ class Member(object):
         return self._binary_type
 
     @property
-    def info(self) -> 'InfoType':
-        return self._additional_info
+    def extra_info(self) -> 'ExtraInfoType':
+        return self._extra_info
 
-    def read(self, fp: 'BinaryIO', data_store: 'DataStore') -> Value:
+    def read(self, fp: 'BinaryIO', data_store: 'DataStore') -> 'Value':
         raise NotImplementedError()
