@@ -14,7 +14,7 @@ if typing.TYPE_CHECKING:
     from typing import BinaryIO, List, Optional, Tuple
 
     from nrbf.enum import BinaryArrayType, BinaryType, PrimitiveType, RecordType
-    from nrbf.primitives import Int32, Int32Value, String, StringValue
+    from nrbf.primitives import Byte, ByteValue, Int32, Int32Value, Primitive, PrimitiveValue, String, StringValue
     from nrbf.structures import ClassInfo, MemberTypeInfo, ExtraInfoType
 
 
@@ -309,6 +309,39 @@ class BinaryLibraryRecord(Record):
         )
 
 
+class BinaryObjectStringRecord(Record):
+    @classmethod
+    def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'BinaryObjectStringRecord':
+        if read_type:
+            Record.read_type(fp, enums.RecordType.BinaryObjectString)
+
+        object_id = primitives.Int32.read(fp)
+        value = primitives.String.read(fp)
+        return BinaryObjectStringRecord(object_id, value)
+
+    def __init__(self, object_id: 'Int32Value', value: 'StringValue') -> None:
+        self._object_id = utils.move(object_id, primitives.Int32)
+        self._value = utils.move(value, primitives.String)
+
+    @property
+    def object_id(self) -> 'Int32':
+        return self._object_id
+
+    @property
+    def value(self) -> 'String':
+        return self._value
+
+    @property
+    def record_type(self) -> 'RecordType':
+        return enums.RecordType.BinaryObjectString
+
+    def __bytes__(self) -> bytes:
+        return bytes(self.object_id) + bytes(self.value)
+
+    def __repr__(self) -> str:
+        return "BinaryObjectStringRecord({}, {})".format(self.object_id, self.value)
+
+
 class ClassWithIdRecord(Record):
     @classmethod
     def read(cls, fp: 'BinaryIO', read_type: bool = False) -> 'ClassWithIdRecord':
@@ -403,6 +436,68 @@ class ClassWithMembersAndTypesRecord(ClassRecord):
         )
 
 
+class MemberPrimitiveTypedRecord(Record):
+    @classmethod
+    def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'MemberPrimitiveTypedRecord':
+        if read_type:
+            Record.read_type(fp, enums.RecordType.MemberPrimitiveTyped)
+
+        type_byte = fp.read(1)[0]
+        type_enum = enums.PrimitiveType(type_byte)
+        type_class = primitives.Primitive.get_class(type_enum)
+        value = type_class.read(fp)
+        return MemberPrimitiveTypedRecord(type_enum, value)
+
+    def __init__(self, type_enum: 'PrimitiveType', value: 'PrimitiveValue') -> None:
+        self._type_enum = type_enum
+        type_class = primitives.Primitive.get_class(type_enum)
+        self._value = utils.move(value, type_class)
+
+    @property
+    def primitive_type(self) -> 'PrimitiveType':
+        return self._type_enum
+
+    @property
+    def value(self) -> 'Primitive':
+        return self._value
+
+    @property
+    def record_type(self) -> 'RecordType':
+        return enums.RecordType.MemberPrimitiveTyped
+
+    def __bytes__(self) -> bytes:
+        return self.primitive_type.to_bytes(1, 'little', signed=False) + bytes(self.value)
+
+    def __repr__(self) -> str:
+        return "MemberPrimitiveTypedRecord(PrimitiveType.{}, {})".format(
+            self.primitive_type.name, self.value
+        )
+
+
+class MemberReferenceRecord(Record):
+    @classmethod
+    def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'MemberReferenceRecord':
+        ref_id = primitives.Int32.read(fp)
+        return MemberReferenceRecord(ref_id)
+
+    def __init__(self, id_ref: 'Int32Value') -> None:
+        self._id_ref = utils.move(id_ref, primitives.Int32)
+
+    @property
+    def reference_id(self) -> 'Int32':
+        return self._id_ref
+
+    @property
+    def record_type(self) -> 'RecordType':
+        return enums.RecordType.MemberReference
+
+    def __bytes__(self) -> bytes:
+        return bytes(self.reference_id)
+
+    def __repr__(self) -> str:
+        return "MemberReferenceRecord({})".format(self.reference_id)
+
+
 class MessageEndRecord(Record):
     @classmethod
     def read(cls, fp: 'BinaryIO', read_type: bool = False) -> 'MessageEndRecord':
@@ -419,6 +514,79 @@ class MessageEndRecord(Record):
 
     def __repr__(self) -> str:
         return "MessageEndRecord()"
+
+
+class ObjectNullRecord(Record):
+    @classmethod
+    def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'ObjectNullRecord':
+        if read_type:
+            Record.read_type(fp, enums.RecordType.ObjectNull)
+
+        return ObjectNullRecord()
+
+    @property
+    def record_type(self) -> 'RecordType':
+        return enums.RecordType.ObjectNull
+
+    def __bytes__(self) -> bytes:
+        return b''
+
+    def __repr__(self) -> str:
+        return "ObjectNullRecord()"
+
+
+class ObjectNullMultipleRecord(Record):
+    @classmethod
+    def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'ObjectNullMultipleRecord':
+        if read_type:
+            Record.read_type(fp, enums.RecordType.ObjectNullMultiple)
+
+        count = primitives.Int32.read(fp)
+        return ObjectNullMultipleRecord(count)
+
+    def __init__(self, count: 'Int32Value') -> None:
+        self._count = utils.move(count, primitives.Int32)
+
+    @property
+    def count(self) -> 'Int32':
+        return self._count
+
+    @property
+    def record_type(self) -> 'RecordType':
+        return enums.RecordType.ObjectNullMultiple
+
+    def __bytes__(self) -> bytes:
+        return bytes(self.count)
+
+    def __repr__(self) -> str:
+        return "ObjectNullMultipleRecord({})".format(self.count)
+
+
+class ObjectNullMultiple256Record(Record):
+    @classmethod
+    def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'ObjectNullMultiple256Record':
+        if read_type:
+            Record.read_type(fp, enums.RecordType.ObjectNullMultiple256)
+
+        count = primitives.Byte.read(fp)
+        return ObjectNullMultiple256Record(count)
+
+    def __init__(self, count: 'ByteValue') -> None:
+        self._count = utils.move(count, primitives.Byte)
+
+    @property
+    def count(self) -> 'Byte':
+        return self._count
+
+    @property
+    def record_type(self) -> 'RecordType':
+        return enums.RecordType.ObjectNullMultiple256
+
+    def __bytes__(self) -> bytes:
+        return bytes(self.count)
+
+    def __repr__(self) -> str:
+        return "ObjectNullMultiple256Record({})".format(self.count)
 
 
 class SerializedStreamHeader(Record):
