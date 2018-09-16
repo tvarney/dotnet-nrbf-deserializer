@@ -78,14 +78,6 @@ class ClassObject(nrbf.value.Value):
     def partial(self) -> bool:
         return self._partial
 
-    @property
-    def written(self) -> bool:
-        return self._written
-
-    @written.setter
-    def written(self, new_value: bool) -> None:
-        self._written = bool(new_value)
-
     def write(self, fp: 'BinaryIO'):
         fp.write(bytes(self))
 
