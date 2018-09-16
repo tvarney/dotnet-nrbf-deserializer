@@ -11,7 +11,7 @@ import nrbf.value
 import typing
 
 if typing.TYPE_CHECKING:
-    from typing import BinaryIO, List, Optional, Tuple
+    from typing import BinaryIO, Dict, List, Optional, Tuple, Type
 
     from nrbf.enum import BinaryArrayType, BinaryType, PrimitiveType, RecordType
     from nrbf.primitives import Byte, ByteValue, Int32, Int32Value, Primitive, PrimitiveValue, String, StringValue
@@ -19,6 +19,12 @@ if typing.TYPE_CHECKING:
 
 
 class Record(nrbf.value.Value, metaclass=abc.ABCMeta):
+    _Types = dict()  # type: Dict[RecordType, Type[Record]]
+
+    @staticmethod
+    def get_class(record_type: 'RecordType'):
+        return Record._Types[record_type]
+
     @staticmethod
     def read_type(fp: 'BinaryIO', expected: 'RecordType') -> None:
         byte_value = fp.read(1)[0]
@@ -516,6 +522,9 @@ class MessageEndRecord(Record):
         return "MessageEndRecord()"
 
 
+# TODO: Implement MethodCallRecord
+# TODO: Implement MethodReturnRecord
+
 class ObjectNullRecord(Record):
     @classmethod
     def read(cls, fp: 'BinaryIO', read_type: bool=False) -> 'ObjectNullRecord':
@@ -700,3 +709,25 @@ class SystemClassWithMembersAndTypesRecord(ClassRecord):
             repr(self.class_info),
             repr(self.member_type_info)
         )
+
+
+Record._Types = {
+    enums.RecordType.SerializedStreamHeader: SerializedStreamHeader,
+    enums.RecordType.ClassWithId: ClassWithIdRecord,
+    enums.RecordType.SystemClassWithMembers: SystemClassWithMembersRecord,
+    enums.RecordType.ClassWithMembers: ClassWithMembersRecord,
+    enums.RecordType.SystemClassWithMembersAndTypes: SystemClassWithMembersAndTypesRecord,
+    enums.RecordType.ClassWithMembersAndTypes: ClassWithMembersAndTypesRecord,
+    enums.RecordType.BinaryObjectString: BinaryObjectStringRecord,
+    enums.RecordType.BinaryArray: BinaryArrayRecord,
+    enums.RecordType.MemberPrimitiveTyped: MemberPrimitiveTypedRecord,
+    enums.RecordType.MemberReference: MemberReferenceRecord,
+    enums.RecordType.ObjectNull: ObjectNullRecord,
+    enums.RecordType.MessageEnd: MessageEndRecord,
+    enums.RecordType.BinaryLibrary: BinaryLibraryRecord,
+    enums.RecordType.ObjectNullMultiple256: ObjectNullMultiple256Record,
+    enums.RecordType.ObjectNullMultiple: ObjectNullMultipleRecord,
+    enums.RecordType.ArraySinglePrimitive: ArraySinglePrimitiveRecord,
+    enums.RecordType.ArraySingleObject: ArraySingleObjectRecord,
+    enums.RecordType.ArraySingleString: ArraySingleStringRecord
+}
