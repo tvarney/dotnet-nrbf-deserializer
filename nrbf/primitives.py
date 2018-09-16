@@ -12,7 +12,7 @@ if typing.TYPE_CHECKING:
     from typing import Any, BinaryIO, List, Tuple, Type, Union
     from nrbf.enum import PrimitiveType
 
-    BooleanValue = Any
+    BooleanValue = Union[bool, bytes, 'Boolean']
     ByteValue = Union[int, bytes, 'Byte']
     CharValue = Union[int, bytes, str, 'Char']
     DateTimeValue = Union[int, bytes, Tuple[int, 'DateTime.Kind'], 'DateTime']
@@ -28,6 +28,11 @@ if typing.TYPE_CHECKING:
     UInt16Value = Union[int, bytes, 'UInt16']
     UInt32Value = Union[int, bytes, 'UInt32']
     UInt64Value = Union[int, bytes, 'UInt64']
+
+    PrimitiveValue = Union[
+        BooleanValue, ByteValue, CharValue, DateTimeValue, DecimalValue, DoubleValue, Int8Value, Int16Value,
+        Int32Value, Int64Value, SingleValue, StringValue, TimeSpanValue, UInt16Value, UInt32Value, UInt64Value
+    ]
 
 
 class Primitive(nrbf.value.Value, metaclass=abc.ABCMeta):
