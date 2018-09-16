@@ -1,4 +1,6 @@
 
+import io
+
 import nrbf.enum as enums
 import nrbf.primitives as primitives
 import nrbf.utils as utils
@@ -9,7 +11,35 @@ if typing.TYPE_CHECKING:
     from nrbf.enum import BinaryType, PrimitiveType
     from nrbf.primitives import Int32, Int32Value, String, StringValue
 
-    MethodExtraInfoType = Union[PrimitiveType, String, 'ClassTypeInfo', None]
+    ExtraInfoType = Union[PrimitiveType, String, 'ClassTypeInfo', None]
+
+
+class ExtraTypeInfo(object):
+    @staticmethod
+    def read(fp: 'BinaryIO', bin_type: 'BinaryType') -> 'ExtraInfoType':
+        if bin_type == enums.BinaryType.Primitive or bin_type == enums.BinaryType.PrimitiveArray:
+            byte_value = fp.read(1)[0]
+            primitive_type = enums.PrimitiveType(byte_value)
+            return primitive_type
+        elif bin_type == enums.BinaryType.SystemClass:
+            return primitives.String.read(fp)
+        elif bin_type == enums.BinaryType.Class:
+            return ClassTypeInfo.read(fp)
+        return None
+
+    @staticmethod
+    def validate(bin_type: 'BinaryType', value: 'ExtraInfoType') -> bool:
+        value_type = type(value)
+        if bin_type == enums.BinaryType.Primitive or bin_type == enums.BinaryType.PrimitiveArray:
+            return value_type is enums.PrimitiveType
+        if bin_type == enums.BinaryType.SystemClass:
+            return value_type is primitives.String
+        if bin_type == enums.BinaryType.Class:
+            return value_type is ClassTypeInfo
+        return value is None
+
+    def __init__(self) -> None:
+        raise NotImplementedError("ExtraTypeInfo::__init__() not implemented")
 
 
 class ClassTypeInfo(object):
@@ -38,8 +68,13 @@ class ClassTypeInfo(object):
         return self._library_id
 
     def write(self, fp: 'BinaryIO') -> None:
-        self._class_name.write(fp)
-        self._library_id.write(fp)
+        fp.write(bytes(self))
+
+    def __bytes__(self) -> bytes:
+        return b''.join((
+            bytes(self._class_name),
+            bytes(self._library_id)
+        ))
 
 
 class ClassInfo(object):
@@ -79,6 +114,11 @@ class ClassInfo(object):
         for member_name in self._members:
             member_name.write(fp)
 
+    def __bytes__(self) -> bytes:
+        b_io = io.BytesIO()
+        self.write(b_io)
+        return b_io.getvalue()
+
 
 class MemberTypeInfo(object):
     @classmethod
@@ -91,19 +131,10 @@ class MemberTypeInfo(object):
             bin_types.append(bin_type)
 
         for bin_type in bin_types:
-            if bin_type == enums.BinaryType.Primitive or bin_type == enums.BinaryType.PrimitiveArray:
-                byte_value = fp.read(1)[0]
-                primitive_type = enums.PrimitiveType(byte_value)
-                extra_info.append(primitive_type)
-            elif bin_type == enums.BinaryType.SystemClass:
-                extra_info.append(primitives.String.read(fp))
-            elif bin_type == enums.BinaryType.Class:
-                extra_info.append(ClassTypeInfo.read(fp))
-            else:
-                extra_info.append(None)
+            extra_info.append(ExtraTypeInfo.read(fp, bin_type))
         return MemberTypeInfo(bin_types, extra_info)
 
-    def __init__(self, bin_types: 'List[BinaryType]', extra_info: 'List[MethodExtraInfoType]') -> None:
+    def __init__(self, bin_types: 'List[BinaryType]', extra_info: 'List[ExtraInfoType]') -> None:
         self._bin_types = bin_types
         self._extra_info = extra_info
 
@@ -112,7 +143,7 @@ class MemberTypeInfo(object):
         return self._bin_types
 
     @property
-    def extra_info(self) -> 'List[MethodExtraInfoType]':
+    def extra_info(self) -> 'List[ExtraInfoType]':
         return self._extra_info
 
     def write(self, fp: 'BinaryIO') -> None:
@@ -131,3 +162,8 @@ class MemberTypeInfo(object):
                 pass
             else:
                 raise TypeError("Unexpected type {} in MemberTypeInfo.extra_info".format(value_type.__name__))
+
+    def __bytes__(self) -> bytes:
+        b_io = io.BytesIO()
+        self.write(b_io)
+        return b_io.getvalue()
