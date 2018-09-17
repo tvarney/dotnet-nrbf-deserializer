@@ -12,10 +12,11 @@ import nrbf.value
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import BinaryIO, Dict, List, Tuple, Union
+    from typing import Any, BinaryIO, Dict, List, Tuple, Union
     from nrbf.enum import BinaryType
-    from nrbf.primitives import Int32, Int32Value
-    from nrbf.record import ClassRecord, Record
+    from nrbf.primitives import Int32, Int32Value, Primitive, PrimitiveValue
+    from nrbf.record import ArrayRecord, ArraySingleObjectRecord, ArraySinglePrimitiveRecord, ArraySingleStringRecord, \
+        ClassRecord, Record
     from nrbf.structures import ExtraInfoType
     from nrbf.value import Value
 
@@ -32,7 +33,7 @@ class DataStore(object):
         with open(filename, 'rb') as fp:
             return self.read_stream(fp, clear_records)
 
-    def _build_class(self, class_record: 'ClassRecord') -> 'ClassObject':
+    def build_class(self, class_record: 'ClassRecord') -> 'ClassObject':
         class_name = class_record.name.value
         library_id = class_record.library_id.value
         member_type_info = class_record.member_type_info
@@ -59,7 +60,9 @@ class DataStore(object):
         class_object = ClassObject(class_name, members, partial, library_id)
         old_class_object = self._classes.get((library_id, class_name), None)
         if old_class_object is not None:
-            pass
+            if old_class_object != class_object:
+                raise ValueError("Non-equal duplicate class definition")
+            return old_class_object
         else:
             self._classes[library_id, class_name] = class_object
         return class_object
@@ -80,7 +83,10 @@ class DataStore(object):
             records_read += 1
             self._records.append(record_instance)
             if issubclass(record_class, record.ClassRecord):
-                class_object = self._build_class(record_instance)
+                class_record = record_instance  # type: ClassRecord
+                class_object = self.build_class(record_instance)
+                class_instance = class_object.read_instance(fp, self, class_record.object_id)
+                self._objects[class_record.object_id.value] = class_instance
 
         return records_read
 
@@ -99,8 +105,60 @@ class Instance(nrbf.value.Value, metaclass=abc.ABCMeta):
 
 
 class ArrayInstance(Instance, metaclass=abc.ABCMeta):
-    def __init__(self, object_id: 'Int32Value') -> None:
-        Instance.__init__(self, object_id)
+    @staticmethod
+    def read(fp: 'BinaryIO', data_store: 'DataStore', array_record: 'ArrayRecord') -> 'ArrayInstance':
+        if array_record.record_type == enums.RecordType.ArraySinglePrimitive:
+            array_record: ArraySinglePrimitiveRecord
+            return PrimitiveArray.read(fp, data_store, array_record)
+        if array_record.record_type == enums.RecordType.ArraySingleObject:
+            pass
+        if array_record.record_type == enums.RecordType.ArraySingleString:
+            pass
+        if array_record.record_type == enums.RecordType.BinaryArray:
+            pass
+
+
+class ObjectArray(ArrayInstance):
+    def __init__(self, object_id: 'Int32Value', data: 'List[Any]'):
+        ArrayInstance.__init__(self, object_id)
+        self._data = data
+
+    def __getitem__(self, index: int) -> 'Any':
+        return self._data[index]
+
+
+class PrimitiveArray(ArrayInstance):
+    @staticmethod
+    def read(fp: 'BinaryIO', data_store: 'DataStore', array_record: 'ArraySinglePrimitiveRecord') -> 'PrimitiveArray':
+        primitive_type = array_record.primitive_type
+        primitive_class = primitive.Primitive.get_class(primitive_type)
+        data = list()  # type: List[Primitive]
+        for _ in range(array_record.length.value):
+            data.append(primitive_class.read(fp))
+        return PrimitiveArray(array_record.object_id, primitive_class, data)
+
+    def __init__(self, object_id: 'Int32Value', primitive_class: type, data: 'List[Primitive]') -> None:
+        ArrayInstance.__init__(self, object_id)
+        self._data_class = primitive_class
+        self._data = data
+
+    def write(self, fp: 'BinaryIO') -> None:
+        fp.write(enums.RecordType.ArraySinglePrimitive.to_bytes(1, 'little', signed=False))
+        fp.write(bytes(self.object_id))
+        fp.write(len(self._data).to_bytes(4, 'little', signed=True))
+        for item in self._data:
+            fp.write(bytes(item))
+
+    def __getitem__(self, index: int) -> 'Primitive':
+        return self._data[index]
+
+    def __setitem__(self, index: int, new_data: 'PrimitiveValue') -> None:
+        self._data[index].value = utils.move(new_data, self._data_class)
+
+    def __bytes__(self) -> bytes:
+        b_io = io.BytesIO()
+        self.write(b_io)
+        return b_io.getvalue()
 
 
 class ClassInstance(Instance):
@@ -170,11 +228,38 @@ class ClassObject(nrbf.value.Value):
     def get_member(self, member_name: str) -> 'Member':
         return self._lookup[member_name]
 
+    def read_instance(self, fp: 'BinaryIO', data_store: 'DataStore', object_id: 'Int32Value') -> 'ClassInstance':
+        member_data = list()  # type: List[Value]
+        for member in self._members:
+            member_data.append(member.read(fp, data_store))
+
+        return ClassInstance(object_id, self, member_data)
+
     def write(self, fp: 'BinaryIO'):
         fp.write(bytes(self))
 
     def __bytes__(self) -> bytes:
         return b''
+
+    def __eq__(self, other: 'Any') -> bool:
+        if type(other) is not ClassObject:
+            return False
+        class_obj = other  # type: ClassObject
+        if class_obj.library != self.library:
+            return False
+        if class_obj.name != self.name:
+            return False
+        member_count = len(self.members)
+        if member_count != len(class_obj.members):
+            return False
+
+        for i in range(member_count):
+            if self.members[i] != class_obj.members[i]:
+                return False
+        return True
+
+    def __ne__(self, other: 'Any') -> bool:
+        return not self.__eq__(other)
 
 
 class Member(object):
@@ -204,4 +289,31 @@ class Member(object):
         return self._extra_info
 
     def read(self, fp: 'BinaryIO', data_store: 'DataStore') -> 'Value':
-        raise NotImplementedError()
+        if self._binary_type == enums.BinaryType.Primitive:
+            primitive_class = primitive.Primitive.get_class(self._extra_info)
+            return primitive_class.read(fp)
+        # If it isn't a primitivev, then read a record byte from the stream
+        record_byte = fp.read(1)[0]
+        record_type = enums.RecordType(record_byte)
+        record_class = record.Record.get_class(record_type)
+        record_instance = record_class.read(fp)
+        if issubclass(record_class, record.ArrayRecord):
+            # TODO: Read the array data from the stream
+            pass
+        elif issubclass(record_class, record.ClassRecord):
+            class_record: 'ClassRecord'
+            class_object = data_store.build_class(class_record)
+            class_instance = class_object.read_instance(fp, data_store, class_record.object_id)
+            return class_instance
+        return record_instance
+
+    def __eq__(self, other: 'Any') -> bool:
+        if type(other) is not Member:
+            return False
+
+        member_obj = other  # type: Member
+        return (member_obj.index == self.index and member_obj.name == self.name and
+                member_obj.binary_type == self.binary_type and member_obj.extra_info == self.extra_info)
+
+    def __ne__(self, other: 'Any') -> bool:
+        return not self.__eq__(other)
