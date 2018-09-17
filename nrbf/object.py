@@ -100,9 +100,12 @@ class DataStore(object):
             self._records.append(record_instance)
             if issubclass(record_class, record.ClassRecord):
                 class_record = record_instance  # type: ClassRecord
-                class_object = self.build_class(record_instance)
+                class_object = self.build_class(class_record)
                 class_instance = class_object.read_instance(fp, self, class_record.object_id)
                 self._objects[class_record.object_id.value] = class_instance
+            elif record_class is record.BinaryLibraryRecord:
+                library_record = record_instance  # type: record.BinaryLibraryRecord
+                self._libraries[library_record.library_id.value] = library_record.name.value
 
             record_type_byte = fp.read(1)[0]
             record_type = enums.RecordType(record_type_byte)
