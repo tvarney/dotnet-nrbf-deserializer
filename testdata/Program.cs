@@ -21,8 +21,81 @@ namespace TestData
         public decimal decimal_v;
         public DateTime datetime_v;
         public TimeSpan timespan_v;
-        public string null_v;
-        public string string_v;
+
+        public Primitives(int seed) {
+            DateTime d1 = new DateTime(1010101010 + seed, DateTimeKind.Local);
+            DateTime d2 = new DateTime(685940000 + seed, DateTimeKind.Local);
+            TimeSpan interval = d1 - d2;
+
+            bool_v = true;
+            byte_v = (byte)75;
+            sbyte_v = (sbyte)-39;
+            short_v = (short)-30754;
+            ushort_v = (ushort)61937;
+            int_v = -2019964829;
+            uint_v =  4082738291;
+            long_v = -9122372936854775843L;
+            ulong_v =  17446744973709521615ul;
+            float_v = 745.01f;
+            double_v = 829.0192;
+            decimal_v = 4310865659943.575646355933126m;
+            timespan_v = d1 - d2;
+            datetime_v = d1;
+        }
+    }
+
+    [Serializable]
+    public struct PrimitiveArrays
+    {
+        public bool[] bools;
+        public byte[] bytes;
+        public sbyte[] sbytes;
+        public short[] shorts;
+        public ushort[] ushorts;
+        public int[] ints;
+        public uint[] uints;
+        public long[] longs;
+        public ulong[] ulongs;
+        public float[] floats;
+        public double[] doubles;
+        public decimal[] decimals;
+        public DateTime[] datetimes;
+        public TimeSpan[] timespans;
+
+        public PrimitiveArrays(int size) {
+            bools = new bool[size];
+            bytes = new byte[size];
+            sbytes = new sbyte[size];
+            shorts = new short[size];
+            ushorts = new ushort[size];
+            ints = new int[size];
+            uints = new uint[size];
+            longs = new long[size];
+            ulongs = new ulong[size];
+            floats = new float[size];
+            doubles = new double[size];
+            decimals = new decimal[size];
+            datetimes = new DateTime[size];
+            timespans = new TimeSpan[size];
+
+            DateTime reference = new DateTime(1000010, DateTimeKind.Local);
+            for(int i = 0; i < size; ++i) {
+                bools[i] = (i%2) == 0;
+                bytes[i] = (byte)i;
+                sbytes[i] = (sbyte)i;
+                shorts[i] = (short)i;
+                ushorts[i] = (ushort)i;
+                ints[i] = i;
+                uints[i] = (uint)i;
+                longs[i] = (long)i;
+                ulongs[i] = (ulong)i;
+                floats[i] = (float)(10.827 + i);
+                doubles[i] = (double)(8.29 - i);
+                decimals[i] = (decimal)(100.1010101010101010111 + i);
+                datetimes[i] = new DateTime(1000010 + i * 10, DateTimeKind.Local);
+                timespans[i] = datetimes[i] - reference;
+            }
+        }
     }
 
     [Serializable]
@@ -60,64 +133,20 @@ namespace TestData
         {
             FileStream fs = new FileStream("./primitives.dat", FileMode.OpenOrCreate);
             BinaryFormatter formatter = new BinaryFormatter();
-            Primitives p;
-            p.bool_v = true;
-            p.byte_v = 75;
-            p.sbyte_v = -39;
-            p.short_v = -30754;
-            p.ushort_v = 61937;
-            p.int_v = -2019964829;
-            p.uint_v = 4082738291;
-            p.long_v = -9122372936854775843;
-            p.ulong_v = 17446744973709521615;
-            p.float_v = 745.01f;
-            p.double_v = 829.0192;
-            p.decimal_v = 4310865659943.575646355933126m;
-            p.null_v = null;
-            p.string_v = "Hello World";
-
-            DateTime d1 = new DateTime(1010101010, DateTimeKind.Local);
-            DateTime d2 = new DateTime(685940000, DateTimeKind.Local);
-            TimeSpan interval = d1 - d2;
-            p.timespan_v = d1 - d2;
-            p.datetime_v = d1;
-
-            formatter.Serialize(fs, p);
+            formatter.Serialize(fs, new Primitives(0));
         }
 
         public static void PrimitiveArrays()
         {
-            byte[] bytes = new byte[10];
-            sbyte[] sbytes = new sbyte[10];
-            short[] shorts = new short[10];
-            ushort[] ushorts = new ushort[10];
-            int[] ints = new int[10];
-            uint[] uints = new uint[10];
-            long[] longs = new long[10];
-            ulong[] ulongs = new ulong[10];
-            float[] floats = new float[10];
-            double[] doubles = new double[10];
-            char[] chars = new char[10];
-            TimeSpan[] times = new TimeSpan[10];
-            DateTime[] datetimes = new DateTime[10];
-            decimal[] decimals = new decimal[10];
-
-            for(int i = 0; i < 10; ++i)
-            {
-                bytes[i] = (byte)i;
-                sbytes[i] = (sbyte)(i - 5);
-                shorts[i] = (short)((i - 5) * 100);
-                ushorts[i] = (ushort)(i * 100);
-                ints[i] = (i - 5) * 1000;
-                uints[i] = (uint)(i * 1000);
-                longs[i] = (long)(i - 5) * 10000;
-                ulongs[i] = (ulong)i * 10000;
-            }
+            FileStream fs = new FileStream("./primitive_arrays.dat", FileMode.OpenOrCreate);
+            BinaryFormatter bf = new BinaryFormatter();
+            bf.Serialize(fs, new PrimitiveArrays(5));
         }
 
         static void Main(string[] args)
         {
             Primitives();
+            PrimitiveArrays();
         }
     }
 }
