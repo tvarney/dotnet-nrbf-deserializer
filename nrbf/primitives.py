@@ -516,7 +516,7 @@ class Double(Primitive):
         if value_type is Double:
             return value.value
         if value_type is bytes:
-            if len(value) != 9:
+            if len(value) != 8:
                 raise ValueError("Double requires 8 bytes to unpack")
             return struct.unpack('d', value)[0]
         raise TypeError("Double must be one of float, bytes, or Double")
@@ -781,7 +781,7 @@ class Single(Primitive):
         raise TypeError("Single must be one of float, bytes, or Single")
 
     def __init__(self, value: 'SingleValue') -> None:
-        self._value = value
+        self._value = Single.convert(value)
 
     @property
     def value(self) -> float:
