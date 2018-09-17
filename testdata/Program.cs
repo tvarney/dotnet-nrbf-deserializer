@@ -58,7 +58,7 @@ namespace TestData
     {
         public static void Primitives()
         {
-            FileStream fs = new FileStream("../primitives.dat", FileMode.OpenOrCreate);
+            FileStream fs = new FileStream("./primitives.dat", FileMode.OpenOrCreate);
             BinaryFormatter formatter = new BinaryFormatter();
             Primitives p;
             p.bool_v = true;
