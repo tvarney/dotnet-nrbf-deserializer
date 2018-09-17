@@ -29,6 +29,22 @@ class DataStore(object):
         self._classes = dict()  # type: Dict[Tuple[int, str], ClassObject]
         self._known_metadata = dict()  # type: Dict[Tuple[str, str], object]
 
+    @property
+    def records(self) -> 'List[Record]':
+        return self._records
+
+    @property
+    def libraries(self) -> 'Dict[int, str]':
+        return self._libraries
+
+    @property
+    def objects(self) -> 'Dict[int, Instance]':
+        return self._objects
+
+    @property
+    def classes(self) -> 'Dict[Tuple[int, str], ClassObject]':
+        return self._classes
+
     def read_file(self, filename: str, clear_records: bool=True) -> int:
         with open(filename, 'rb') as fp:
             return self.read_stream(fp, clear_records)
@@ -87,6 +103,9 @@ class DataStore(object):
                 class_object = self.build_class(record_instance)
                 class_instance = class_object.read_instance(fp, self, class_record.object_id)
                 self._objects[class_record.object_id.value] = class_instance
+
+            record_type_byte = fp.read(1)[0]
+            record_type = enums.RecordType(record_type_byte)
 
         return records_read
 
@@ -175,7 +194,7 @@ class ClassInstance(Instance):
     def member_data(self) -> 'List[Value]':
         return self._member_data
 
-    def __getitem__(self, key: 'Union[int, str]') -> Value:
+    def __getitem__(self, key: 'Union[int, str]') -> 'Value':
         if type(key) is int:
             return self._member_data[key]
         member_idx = self._class_object.get_member(key).index
