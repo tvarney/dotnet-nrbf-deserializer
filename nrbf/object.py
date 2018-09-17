@@ -323,9 +323,10 @@ class Member(object):
             # TODO: Read the array data from the stream
             pass
         elif issubclass(record_class, record.ClassRecord):
-            class_record: 'ClassRecord'
+            class_record = record_instance  # type:ClassRecord
             class_object = data_store.build_class(class_record)
             class_instance = class_object.read_instance(fp, data_store, class_record.object_id)
+            data_store.objects[class_instance.object_id] = class_instance
             return class_instance
         return record_instance
 
