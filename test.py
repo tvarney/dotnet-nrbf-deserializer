@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import argparse
+
 from nrbf.object import DataStore, ClassInstance
 
 import typing
@@ -38,8 +40,18 @@ def inspect_class_inst(inst: 'ClassInstance'):
         print("      {}: {}".format(inst.class_object.members[i].name, value))
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
+    import sys
+
+    parser = argparse.ArgumentParser(description="NRBF Test Data Visualizer")
+    parser.add_argument("--file", "-f", help="Data file to parse")
+
+    args = parser.parse_args()
+    if args.file is None:
+        print("No input file specified")
+        sys.exit(1)
+
     ds = DataStore()
-    ds.read_file("./testdata/primitives.dat")
+    ds.read_file(args.file)
     inspect_classes(ds.classes, ds.libraries)
     inspect_objects(ds.objects)
