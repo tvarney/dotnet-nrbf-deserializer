@@ -2,7 +2,7 @@
 
 import argparse
 
-from nrbf.object import DataStore, ClassInstance
+from nrbf.object import DataStore, PrimitiveArray, ClassInstance
 
 import typing
 if typing.TYPE_CHECKING:
@@ -22,7 +22,7 @@ def inspect_classes(classes: 'Dict[Tuple[int, str], ClassObject]', libraries: 'D
 def inspect_objects(objects: 'Dict[int, Instance]'):
     print("Read {} objects".format(len(objects)))
     for obj_id, obj in objects.items():
-        print("  object[{}]".format(obj_id, type(obj).__name__))
+        print("  object[{}]: {}".format(obj_id, type(obj).__name__))
         inspect_instance(obj)
 
 
@@ -31,6 +31,16 @@ def inspect_instance(instance: 'Instance') -> None:
     if instance_type is ClassInstance:
         instance: ClassInstance
         inspect_class_inst(instance)
+    elif instance_type is PrimitiveArray:
+        instance: PrimitiveArray
+        inspect_primitive_array(instance)
+
+
+def inspect_primitive_array(inst: 'PrimitiveArray') -> None:
+    print("    Data Type: {}".format(inst.primitive_class.__name__))
+    print("    Values:")
+    for i, value in enumerate(inst):
+        print("      value[{}] = {}".format(i, value))
 
 
 def inspect_class_inst(inst: 'ClassInstance'):
