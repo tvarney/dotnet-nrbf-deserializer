@@ -2,12 +2,12 @@
 
 import argparse
 
-from nrbf.object import DataStore, PrimitiveArray, ClassInstance
+from dotnet.object import DataStore, PrimitiveArray, ClassInstance
 
 import typing
 if typing.TYPE_CHECKING:
     from typing import Dict, Tuple
-    from nrbf.object import ClassObject, Instance
+    from dotnet.object import ClassObject, Instance
 
 
 def inspect_classes(classes: 'Dict[Tuple[int, str], ClassObject]', libraries: 'Dict[int, str]'):

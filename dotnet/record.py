@@ -1,24 +1,24 @@
 import abc
 import io
 
-import nrbf.enum as enums
-import nrbf.exceptions as exceptions
-import nrbf.primitives as primitives
-import nrbf.structures as structs
-import nrbf.utils as utils
-import nrbf.value
+import dotnet.enum as enums
+import dotnet.exceptions as exceptions
+import dotnet.primitives as primitives
+import dotnet.structures as structs
+import dotnet.utils as utils
+import dotnet.value
 
 import typing
 
 if typing.TYPE_CHECKING:
     from typing import BinaryIO, Dict, List, Optional, Tuple, Type
 
-    from nrbf.enum import BinaryArrayType, BinaryType, PrimitiveType, RecordType
-    from nrbf.primitives import Byte, ByteValue, Int32, Int32Value, Primitive, PrimitiveValue, String, StringValue
-    from nrbf.structures import ClassInfo, MemberTypeInfo, ExtraInfoType
+    from dotnet.enum import BinaryArrayType, BinaryType, PrimitiveType, RecordType
+    from dotnet.primitives import Byte, ByteValue, Int32, Int32Value, Primitive, PrimitiveValue, String, StringValue
+    from dotnet.structures import ClassInfo, MemberTypeInfo, ExtraInfoType
 
 
-class Record(nrbf.value.Value, metaclass=abc.ABCMeta):
+class Record(dotnet.value.Value, metaclass=abc.ABCMeta):
     _Types = dict()  # type: Dict[RecordType, Type[Record]]
 
     @staticmethod
@@ -282,8 +282,8 @@ class BinaryLibraryRecord(Record):
     def read(cls, fp: 'BinaryIO', read_type: bool = False) -> 'BinaryLibraryRecord':
         if read_type:
             Record.read_type(fp, enums.RecordType.BinaryLibrary)
-        lib_id = nrbf.primitives.Int32.read(fp)
-        name = nrbf.primitives.String.read(fp)
+        lib_id = primitives.Int32.read(fp)
+        name = primitives.String.read(fp)
         return BinaryLibraryRecord(lib_id, name)
 
     def __init__(self, lib_id: 'Int32Value', lib_name: 'StringValue') -> None:
@@ -612,10 +612,10 @@ class SerializedStreamHeader(Record):
 
     def __init__(self, root_id: 'Int32Value', header_id: 'Int32Value', major_version: 'Int32Value',
                  minor_version: 'Int32Value') -> None:
-        self._root = utils.move(nrbf.primitives.Int32(root_id), primitives.Int32)
-        self._header = utils.move(nrbf.primitives.Int32(header_id), primitives.Int32)
-        self._major = utils.move(nrbf.primitives.Int32(major_version), primitives.Int32)
-        self._minor = utils.move(nrbf.primitives.Int32(minor_version), primitives.Int32)
+        self._root = utils.move(dotnet.primitives.Int32(root_id), primitives.Int32)
+        self._header = utils.move(primitives.Int32(header_id), primitives.Int32)
+        self._major = utils.move(primitives.Int32(major_version), primitives.Int32)
+        self._minor = utils.move(primitives.Int32(minor_version), primitives.Int32)
 
     @property
     def root_id(self) -> 'Int32':
