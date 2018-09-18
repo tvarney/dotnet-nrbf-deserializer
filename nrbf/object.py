@@ -103,6 +103,10 @@ class DataStore(object):
                 class_object = self.build_class(class_record)
                 class_instance = class_object.read_instance(fp, self, class_record.object_id)
                 self._objects[class_record.object_id.value] = class_instance
+            elif issubclass(record_class, record.ArrayRecord):
+                array_record = record_instance  # type: ArrayRecord
+                array_instance = ArrayInstance.read(fp, self, array_record)
+                self._objects[array_instance.object_id] = array_instance
             elif record_class is record.BinaryLibraryRecord:
                 library_record = record_instance  # type: record.BinaryLibraryRecord
                 self._libraries[library_record.library_id.value] = library_record.name.value
@@ -164,6 +168,10 @@ class PrimitiveArray(ArrayInstance):
         self._data_class = primitive_class
         self._data = data
 
+    @property
+    def primitive_class(self) -> type:
+        return self._data_class
+
     def write(self, fp: 'BinaryIO') -> None:
         fp.write(enums.RecordType.ArraySinglePrimitive.to_bytes(1, 'little', signed=False))
         fp.write(bytes(self.object_id))
@@ -176,6 +184,13 @@ class PrimitiveArray(ArrayInstance):
 
     def __setitem__(self, index: int, new_data: 'PrimitiveValue') -> None:
         self._data[index].value = utils.move(new_data, self._data_class)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __iter__(self):
+        for value in self._data:
+            yield value
 
     def __bytes__(self) -> bytes:
         b_io = io.BytesIO()
