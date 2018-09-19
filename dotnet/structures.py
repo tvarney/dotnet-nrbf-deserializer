@@ -80,12 +80,16 @@ class ClassTypeInfo(object):
 class ClassInfo(object):
     @classmethod
     def read(cls, fp: 'BinaryIO') -> 'ClassInfo':
-        object_id = primitives.Int32.read(fp)
-        name = primitives.String.read(fp)
-        member_count = primitives.Int32.read(fp).value
+        object_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        name_length = utils.read_multi_byte_int(fp)
+        byte_str = fp.read(name_length)
+        name = byte_str.decode('utf-8')
+        member_count = int.from_bytes(fp.read(4), 'little', signed=True)
         members = list()
         for _ in range(member_count):
-            members.append(primitives.String.read(fp))
+            str_len = utils.read_multi_byte_int(fp)
+            byte_str = fp.read(str_len)
+            members.append(byte_str.decode('utf-8'))
         return ClassInfo(object_id, name, members)
 
     def __init__(self, object_id: 'Int32Value', name: 'StringValue', members: 'List[StringValue]') -> None:

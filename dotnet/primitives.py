@@ -9,7 +9,7 @@ import dotnet.value
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, BinaryIO, List, Tuple, Type, Union
+    from typing import Any, List, Tuple, Type, Union
     from dotnet.enum import PrimitiveType
 
     BooleanValue = Union[bool, bytes, 'Boolean']
@@ -48,8 +48,13 @@ class Primitive(dotnet.value.Value, metaclass=abc.ABCMeta):
 
     @classmethod
     @abc.abstractmethod
-    def read(cls, fp: 'BinaryIO') -> 'Primitive':
-        raise NotImplementedError("{}::read() not implemented".format(cls.__name__))
+    def byte_size(cls) -> int:
+        raise NotImplementedError("{}::byte_size() not implemented".format(cls.__name__))
+
+    @classmethod
+    @abc.abstractmethod
+    def convert(cls, value: 'PrimitiveValue') -> 'Any':
+        raise NotImplementedError("{}::convert() not implemented".format(cls.__name__))
 
     @property
     @abc.abstractmethod
@@ -65,9 +70,6 @@ class Primitive(dotnet.value.Value, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def type(self) -> 'PrimitiveType':
         raise NotImplementedError("{}::type not implemented".format(type(self).__name__))
-
-    def write(self, fp: 'BinaryIO') -> None:
-        fp.write(bytes(self))
 
     def __str__(self) -> str:
         return str(self.value)
@@ -114,11 +116,11 @@ class Primitive(dotnet.value.Value, metaclass=abc.ABCMeta):
 
 class Boolean(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Boolean':
-        return Boolean(fp.read(1))
+    def byte_size(cls) -> int:
+        return 1
 
-    @staticmethod
-    def convert(value: 'BooleanValue') -> bool:
+    @classmethod
+    def convert(cls, value: 'BooleanValue') -> bool:
         value_type = type(value)
         if value_type is bytes:
             return struct.unpack('?', value)[0]
@@ -141,20 +143,17 @@ class Boolean(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Boolean
 
-    def __bytes__(self) -> bytes:
-        return b'\x01' if self._value else b'\x00'
-
     def __repr__(self) -> str:
         return "Boolean({})".format(self._value)
 
 
 class Byte(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Byte':
-        return Byte(fp.read(1))
+    def byte_size(cls) -> int:
+        return 1
 
-    @staticmethod
-    def convert(value: 'ByteValue') -> int:
+    @classmethod
+    def convert(cls, value: 'ByteValue') -> int:
         value_type = type(value)
         if value_type is bytes:
             if len(value) != 1:
@@ -185,29 +184,17 @@ class Byte(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Byte
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(1, 'little')
-
     def __repr__(self) -> str:
         return "Byte({})".format(self._value)
 
 
 class Char(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Char':
-        bytes_value = fp.read(1)
-        first_byte = bytes_value[0]
-        if first_byte > 127:
-            if first_byte >= 0xF0:
-                bytes_value = bytes_value + fp.read(3)
-            elif first_byte >= 0xE0:
-                bytes_value = bytes_value + fp.read(2)
-            else:
-                bytes_value = bytes_value + fp.read(1)
-        return Char(bytes_value)
+    def byte_size(cls) -> int:
+        return -1
 
-    @staticmethod
-    def convert(value: 'CharValue') -> str:
+    @classmethod
+    def convert(cls, value: 'CharValue') -> str:
         value_type = type(value)
         if value_type is int:
             return chr(value)
@@ -239,9 +226,6 @@ class Char(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Char
 
-    def __bytes__(self) -> bytes:
-        return self._value.encode('utf-8')
-
     def __repr__(self) -> str:
         return "Char({})".format(self._value)
 
@@ -254,11 +238,11 @@ class DateTime(Primitive):
         LocalTime = 2
 
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'DateTime':
-        return DateTime(fp.read(8))
+    def byte_size(cls) -> int:
+        return 8
 
-    @staticmethod
-    def convert(value: 'DateTimeValue') -> 'Tuple[int, DateTime.Kind]':
+    @classmethod
+    def convert(cls, value: 'DateTimeValue') -> 'Tuple[int, DateTime.Kind]':
         value_type = type(value)
         if value_type is bytes:
             if len(value) != 8:
@@ -319,9 +303,6 @@ class DateTime(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.DateTime
 
-    def __bytes__(self) -> bytes:
-        return int(self).to_bytes(8, 'little', signed=False)
-
     def __repr__(self) -> str:
         return "DateTime(({}, DateTime.Kind.{}))".format(self._ticks, self._kind.name)
 
@@ -337,10 +318,8 @@ class DateTime(Primitive):
 
 class Decimal(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Decimal':
-        length = utils.read_multi_byte_int(fp)
-        data = fp.read(length)
-        return Decimal(data.decode('utf-8'))
+    def byte_size(cls) -> int:
+        return -1
 
     @staticmethod
     def count_digits(value: str) -> int:
@@ -450,8 +429,8 @@ class Decimal(Primitive):
             return digits > 0
         return False
 
-    @staticmethod
-    def convert(value: 'DecimalValue') -> str:
+    @classmethod
+    def convert(cls, value: 'DecimalValue') -> str:
         value_type = type(value)
         if value_type is int:
             if value > 79228162514264337593543950334:
@@ -495,21 +474,17 @@ class Decimal(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Decimal
 
-    def __bytes__(self) -> bytes:
-        len_prefix = utils.encode_multi_byte_int(len(self._value))
-        return len_prefix + self._value.encode('utf-8')
-
     def __repr__(self) -> str:
         return "Decimal({})".format(repr(self._value))
 
 
 class Double(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Double':
-        return Double(fp.read(8))
+    def byte_size(cls) -> int:
+        return 8
 
-    @staticmethod
-    def convert(value: 'DoubleValue') -> float:
+    @classmethod
+    def convert(cls, value: 'DoubleValue') -> float:
         value_type = type(value)
         if value_type is float:
             return value
@@ -536,20 +511,17 @@ class Double(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Double
 
-    def __bytes__(self) -> bytes:
-        return struct.pack('d', self._value)
-
     def __repr__(self) -> str:
         return "Double({})".format(self._value)
 
 
 class Int8(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Int8':
-        return Int8(fp.read(1))
+    def byte_size(cls) -> int:
+        return 1
 
-    @staticmethod
-    def convert(value: 'Int8Value') -> int:
+    @classmethod
+    def convert(cls, value: 'Int8Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value < -128:
@@ -580,20 +552,17 @@ class Int8(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.SByte
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(1, 'little', signed=True)
-
     def __repr__(self) -> str:
         return "Int8({})".format(self._value)
 
 
 class Int16(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Int16':
-        return Int16(fp.read(2))
+    def byte_size(cls) -> int:
+        return 2
 
-    @staticmethod
-    def convert(value: 'Int16Value') -> int:
+    @classmethod
+    def convert(cls, value: 'Int16Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value < -32768:
@@ -624,20 +593,17 @@ class Int16(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Int16
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(2, 'little', signed=True)
-
     def __repr__(self) -> str:
         return "Int16({})".format(self._value)
 
 
 class Int32(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Int32':
-        return Int32(fp.read(4))
+    def byte_size(cls) -> int:
+        return 4
 
-    @staticmethod
-    def convert(value: 'Int32Value') -> int:
+    @classmethod
+    def convert(cls, value: 'Int32Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value > 2147483647:
@@ -668,20 +634,17 @@ class Int32(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Int32
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(4, 'little', signed=True)
-
     def __repr__(self) -> str:
         return "Int32({})".format(self._value)
 
 
 class Int64(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Int64':
-        return Int64(fp.read(8))
+    def byte_size(cls) -> int:
+        return 8
 
-    @staticmethod
-    def convert(value: 'Int64Value') -> int:
+    @classmethod
+    def convert(cls, value: 'Int64Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value > 9223372036854775807:
@@ -712,21 +675,17 @@ class Int64(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Int64
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(8, 'little', signed=True)
-
     def __repr__(self) -> str:
         return "Int64({})".format(self._value)
 
 
 class String(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'String':
-        length = utils.read_multi_byte_int(fp)
-        return String(fp.read(length).decode('utf-8'))
+    def byte_size(cls) -> int:
+        return -1
 
-    @staticmethod
-    def convert(value: 'StringValue') -> str:
+    @classmethod
+    def convert(cls, value: 'StringValue') -> str:
         value_type = type(value)
         if value_type is str:
             return value
@@ -754,22 +713,17 @@ class String(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.String
 
-    def __bytes__(self) -> bytes:
-        value = self._value.encode('utf-8')
-        length = utils.encode_multi_byte_int(len(value))
-        return length + value
-
     def __repr__(self) -> str:
         return "String({})".format(repr(self._value))
 
 
 class Single(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'Single':
-        return Single(fp.read(4))
+    def byte_size(cls) -> int:
+        return 4
 
-    @staticmethod
-    def convert(new_value: 'SingleValue') -> float:
+    @classmethod
+    def convert(cls, new_value: 'SingleValue') -> float:
         if type(new_value) is float:
             return new_value
         if type(new_value) is Single:
@@ -795,20 +749,17 @@ class Single(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.Single
 
-    def __bytes__(self) -> bytes:
-        return struct.pack('f', self._value)
-
     def __repr__(self) -> str:
         return "Single({})".format(self._value)
 
 
 class TimeSpan(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'TimeSpan':
-        return TimeSpan(fp.read(8))
+    def byte_size(cls) -> int:
+        return 8
 
-    @staticmethod
-    def convert(value: 'TimeSpanValue') -> int:
+    @classmethod
+    def convert(cls, value: 'TimeSpanValue') -> int:
         value_type = type(value)
         if value_type is int:
             if value > 9223372036854775807:
@@ -839,20 +790,17 @@ class TimeSpan(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.TimeSpan
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(8, 'little', signed=False)
-
     def __repr__(self) -> str:
         return "TimeSpan({})".format(self._value)
 
 
 class UInt16(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'UInt16':
-        return UInt16(fp.read(2))
+    def byte_size(cls) -> int:
+        return 2
 
-    @staticmethod
-    def convert(value: 'UInt16Value') -> int:
+    @classmethod
+    def convert(cls, value: 'UInt16Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value > 65535:
@@ -883,20 +831,17 @@ class UInt16(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.UInt16
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(2, 'little', signed=False)
-
     def __repr__(self) -> str:
         return "UInt16({})".format(self._value)
 
 
 class UInt32(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'UInt32':
-        return UInt32(fp.read(4))
+    def byte_size(cls) -> int:
+        return 4
 
-    @staticmethod
-    def convert(value: 'UInt32Value') -> int:
+    @classmethod
+    def convert(cls, value: 'UInt32Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value > 4294967295:
@@ -927,20 +872,17 @@ class UInt32(Primitive):
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.UInt32
 
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(4, 'little', signed=False)
-
     def __repr__(self) -> str:
         return "UInt32({})".format(self._value)
 
 
 class UInt64(Primitive):
     @classmethod
-    def read(cls, fp: 'BinaryIO') -> 'UInt64':
-        return UInt64(fp.read(8))
+    def byte_size(cls) -> int:
+        return 8
 
-    @staticmethod
-    def convert(value: 'UInt64Value') -> int:
+    @classmethod
+    def convert(cls, value: 'UInt64Value') -> int:
         value_type = type(value)
         if value_type is int:
             if value > 18446744073709551615:
@@ -970,9 +912,6 @@ class UInt64(Primitive):
     @property
     def type(self) -> 'PrimitiveType':
         return dotnet.enum.PrimitiveType.UInt64
-
-    def __bytes__(self) -> bytes:
-        return self._value.to_bytes(8, 'little', signed=False)
 
     def __repr__(self) -> str:
         return "UInt64({})".format(self._value)

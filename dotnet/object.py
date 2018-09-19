@@ -1,40 +1,35 @@
 
-import abc
-import io
-
 import dotnet.enum as enums
 import dotnet.exceptions as exception
 import dotnet.primitives as primitive
-import dotnet.record as record
 import dotnet.structures as structs
 import dotnet.utils as utils
 import dotnet.value
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, BinaryIO, Dict, List, Tuple, Union
+    from typing import Any, Dict, List, Tuple, Union
     from dotnet.enum import BinaryType
     from dotnet.primitives import Int32, Int32Value, Primitive, PrimitiveValue
-    from dotnet.record import ArrayRecord, ArraySingleObjectRecord, ArraySinglePrimitiveRecord, \
-        ArraySingleStringRecord, ClassRecord, Record
     from dotnet.structures import ExtraInfoType
     from dotnet.value import Value
 
 
 class DataStore(object):
     def __init__(self) -> None:
-        self._records = list()  # type: List[Record]
-        self._libraries = {-1: "System"}  # type: Dict[int, str]
+        self._next_lib_id = 1
+        self._next_obj_id = 1
+        self._null = InstanceReference(0, self)
+
+        self._libraries = {-1: Library.SystemLibrary}  # type: Dict[int, Library]
         self._objects = dict()  # type: Dict[int, Instance]
         self._classes = dict()  # type: Dict[Tuple[int, str], ClassObject]
-        self._known_metadata = dict()  # type: Dict[Tuple[str, str], object]
+        self._known_metadata = dict()  # type: Dict[Tuple[int, str], List[Member]]
+
+        self._objects[0] = self._null
 
     @property
-    def records(self) -> 'List[Record]':
-        return self._records
-
-    @property
-    def libraries(self) -> 'Dict[int, str]':
+    def libraries(self) -> 'Dict[int, Library]':
         return self._libraries
 
     @property
@@ -45,79 +40,22 @@ class DataStore(object):
     def classes(self) -> 'Dict[Tuple[int, str], ClassObject]':
         return self._classes
 
-    def read_file(self, filename: str, clear_records: bool=True) -> int:
-        with open(filename, 'rb') as fp:
-            return self.read_stream(fp, clear_records)
+    @property
+    def metadata(self) -> 'Dict[Tuple[int, str], List[Member]]':
+        return self._known_metadata
 
-    def build_class(self, class_record: 'ClassRecord') -> 'ClassObject':
-        class_name = class_record.name.value
-        library_id = class_record.library_id.value
-        member_type_info = class_record.member_type_info
-        partial = member_type_info is None
-        if partial:
-            library_name = self._libraries[library_id]
-            key = library_name, class_name
-            member_type_info = self._known_metadata.get(key, None)
-            if member_type_info is None:
-                raise IOError("Partial Class definition encountered with unknown member type information")
+    def get_library_id(self) -> int:
+        lib_id = self._next_lib_id
+        self._next_lib_id += 1
+        return lib_id
 
-        bin_type_len = len(member_type_info.binary_types)
-        member_len = len(class_record.members)
-        if bin_type_len != member_len:
-            raise ValueError("Mismatch in member length and member type info length")
-
-        members = list()  # type: List[Member]
-        for i in range(member_len):
-            member_name = class_record.members[i].value
-            member_bin_type = member_type_info.binary_types[i]
-            member_extra_info = member_type_info.extra_info[i]
-            members.append(Member(i, member_name, member_bin_type, member_extra_info))
-
-        class_object = ClassObject(class_name, members, partial, library_id)
-        old_class_object = self._classes.get((library_id, class_name), None)
-        if old_class_object is not None:
-            if old_class_object != class_object:
-                raise ValueError("Non-equal duplicate class definition")
-            return old_class_object
-        else:
-            self._classes[library_id, class_name] = class_object
-        return class_object
-
-    def read_stream(self, fp: 'BinaryIO', clear_records: bool=True) -> int:
-        records_read = 0
-        if clear_records:
-            self._records.clear()
-
-        record_type_byte = fp.read(1)[0]
-        record_type = enums.RecordType(record_type_byte)
-        if record_type != enums.RecordType.SerializedStreamHeader:
-            raise IOError("Expected first record of stream to be SerializedStreamHeader")
-
-        while record_type != enums.RecordType.MessageEnd:
-            record_class = record.Record.get_class(record_type)
-            record_instance = record_class.read(fp, False)
-            records_read += 1
-            self._records.append(record_instance)
-            if issubclass(record_class, record.ClassRecord):
-                class_record = record_instance  # type: ClassRecord
-                class_object = self.build_class(class_record)
-                class_instance = class_object.read_instance(fp, self, class_record.object_id)
-                self._objects[class_record.object_id.value] = class_instance
-            elif issubclass(record_class, record.ArrayRecord):
-                array_record = record_instance  # type: ArrayRecord
-                array_instance = ArrayInstance.read(fp, self, array_record)
-                self._objects[array_instance.object_id] = array_instance
-            elif record_class is record.BinaryLibraryRecord:
-                library_record = record_instance  # type: record.BinaryLibraryRecord
-                self._libraries[library_record.library_id.value] = library_record.name.value
-
-            record_type_byte = fp.read(1)[0]
-            record_type = enums.RecordType(record_type_byte)
-
-        return records_read
+    def get_object_id(self) -> int:
+        obj_id = self._next_obj_id
+        self._next_obj_id += 1
+        return obj_id
 
 
-class Instance(dotnet.value.Value, metaclass=abc.ABCMeta):
+class Instance(dotnet.value.Value):
     def __init__(self, object_id: 'Int32Value') -> None:
         self._object_id = utils.move(object_id, primitive.Int32)  # type: Int32
 
@@ -130,18 +68,20 @@ class Instance(dotnet.value.Value, metaclass=abc.ABCMeta):
         self._object_id.value = new_object_id
 
 
-class ArrayInstance(Instance, metaclass=abc.ABCMeta):
-    @staticmethod
-    def read(fp: 'BinaryIO', data_store: 'DataStore', array_record: 'ArrayRecord') -> 'ArrayInstance':
-        if array_record.record_type == enums.RecordType.ArraySinglePrimitive:
-            array_record: ArraySinglePrimitiveRecord
-            return PrimitiveArray.read(fp, data_store, array_record)
-        if array_record.record_type == enums.RecordType.ArraySingleObject:
-            pass
-        if array_record.record_type == enums.RecordType.ArraySingleString:
-            pass
-        if array_record.record_type == enums.RecordType.BinaryArray:
-            pass
+class ArrayInstance(Instance):
+    pass
+
+
+class InstanceReference(Instance):
+    def __init__(self, object_id: 'Int32Value', data_store: 'DataStore') -> None:
+        Instance.__init__(self, object_id)
+        self._data_store = data_store
+
+    def data_store(self) -> 'DataStore':
+        pass
+
+    def resolve(self) -> 'Instance':
+        return self._data_store.objects[self._object_id.value]
 
 
 class ObjectArray(ArrayInstance):
@@ -153,16 +93,13 @@ class ObjectArray(ArrayInstance):
         return self._data[index]
 
 
-class PrimitiveArray(ArrayInstance):
-    @staticmethod
-    def read(fp: 'BinaryIO', data_store: 'DataStore', array_record: 'ArraySinglePrimitiveRecord') -> 'PrimitiveArray':
-        primitive_type = array_record.primitive_type
-        primitive_class = primitive.Primitive.get_class(primitive_type)
-        data = list()  # type: List[Primitive]
-        for _ in range(array_record.length.value):
-            data.append(primitive_class.read(fp))
-        return PrimitiveArray(array_record.object_id, primitive_class, data)
+class StringArray(ArrayInstance):
+    def __init__(self, object_id: 'Int32Value', data: 'List[Any]'):
+        ArrayInstance.__init__(self, object_id)
+        self._data = data
 
+
+class PrimitiveArray(ArrayInstance):
     def __init__(self, object_id: 'Int32Value', primitive_class: type, data: 'List[Primitive]') -> None:
         ArrayInstance.__init__(self, object_id)
         self._data_class = primitive_class
@@ -171,13 +108,6 @@ class PrimitiveArray(ArrayInstance):
     @property
     def primitive_class(self) -> type:
         return self._data_class
-
-    def write(self, fp: 'BinaryIO') -> None:
-        fp.write(enums.RecordType.ArraySinglePrimitive.to_bytes(1, 'little', signed=False))
-        fp.write(bytes(self.object_id))
-        fp.write(len(self._data).to_bytes(4, 'little', signed=True))
-        for item in self._data:
-            fp.write(bytes(item))
 
     def __getitem__(self, index: int) -> 'Primitive':
         return self._data[index]
@@ -191,11 +121,6 @@ class PrimitiveArray(ArrayInstance):
     def __iter__(self):
         for value in self._data:
             yield value
-
-    def __bytes__(self) -> bytes:
-        b_io = io.BytesIO()
-        self.write(b_io)
-        return b_io.getvalue()
 
 
 class ClassInstance(Instance):
@@ -218,30 +143,87 @@ class ClassInstance(Instance):
         member_idx = self._class_object.get_member(key).index
         return self._member_data[member_idx]
 
-    def write(self, fp: 'BinaryIO') -> None:
-        pass
 
-    def __bytes__(self) -> bytes:
-        b_io = io.BytesIO()
-        self.write(b_io)
-        return b_io.getvalue()
+class Library(object):
+    NoId = -1
+
+    @staticmethod
+    def parse_string(str_value: str) -> 'Library':
+        parts = str_value.split(",")
+        name = parts[0].strip()
+        options = dict()  # type: Dict[str, str]
+        for i in range(1, len(parts)):
+            opt_parts = parts[i].split("=", 1)
+            if len(opt_parts) == 2:
+                options[opt_parts[0].strip()] = opt_parts[1].strip()
+            else:
+                raise ValueError("Failed to parse library options")
+        return Library(name, **options)
+
+    def __init__(self, name, **options) -> None:
+        self._name = name
+        self._system = bool(options.pop("system", False))
+        self._options = options
+        self._library_id = options.pop("library_id", -1)
+        # TODO: Validate the library id (may truncate)
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def system(self) -> bool:
+        return self._system
+
+    @property
+    def options(self) -> 'Dict[str, str]':
+        return self._options
+
+    @property
+    def id(self) -> int:
+        return self._library_id
+
+    @id.setter
+    def id(self, new_id: int) -> None:
+        if self._library_id != -1:
+            raise RuntimeError("Can not set the library id multiple times")
+        self._library_id = new_id
+
+    def __getitem__(self, key: str) -> str:
+        return self._options[key]
+
+    def __str__(self) -> str:
+        return "[{}]".format(
+            self._name + ', '.join("{}={}".format(key, value) for key, value in self._options.items())
+        )
+
+    def __repr__(self) -> str:
+        return "Library({})".format(
+            self._name + ', '.join("{}={}".format(key, repr(value)) for key, value in self._options.items())
+        )
+
+
+Library.SystemLibrary = Library("System", system=True, library_id=-1)
 
 
 class ClassObject(dotnet.value.Value):
     SystemClass = -1
 
-    def __init__(self, name: str, members: 'List[Member]', partial: bool, library: int=-1) -> None:
+    def __init__(self, name: str, members: 'List[Member]', partial: bool, library: 'Library',
+                 data_store: 'DataStore') -> None:
         """Create a new Class object
 
         :param name: The name of the class
         :param members: The data members of the object
         :param partial: If the class should be written without types
-        :param library: The id of the library this class came from
+        :param library: The resolved library for this class
+        :param data_store: The DataStore holding this class
         """
         self._name = str(name)
         self._members = members
         self._partial = bool(partial)
-        self._library = int(library)
+        self._library = library
+        self._data_store = data_store
         self._lookup = dict()  # Dict[str, Member]
         for member in self._members:
             self._lookup[member.name] = member
@@ -255,28 +237,23 @@ class ClassObject(dotnet.value.Value):
         return self._members
 
     @property
-    def library(self) -> int:
+    def library(self) -> 'Library':
         return self._library
+
+    @property
+    def library_id(self) -> int:
+        return self._library.id
 
     @property
     def partial(self) -> bool:
         return self._partial
 
+    @property
+    def key(self) -> 'Tuple[int, str]':
+        return self._library.id, self._name
+
     def get_member(self, member_name: str) -> 'Member':
         return self._lookup[member_name]
-
-    def read_instance(self, fp: 'BinaryIO', data_store: 'DataStore', object_id: 'Int32Value') -> 'ClassInstance':
-        member_data = list()  # type: List[Value]
-        for member in self._members:
-            member_data.append(member.read(fp, data_store))
-
-        return ClassInstance(object_id, self, member_data)
-
-    def write(self, fp: 'BinaryIO'):
-        fp.write(bytes(self))
-
-    def __bytes__(self) -> bytes:
-        return b''
 
     def __eq__(self, other: 'Any') -> bool:
         if type(other) is not ClassObject:
@@ -324,26 +301,6 @@ class Member(object):
     @property
     def extra_info(self) -> 'ExtraInfoType':
         return self._extra_info
-
-    def read(self, fp: 'BinaryIO', data_store: 'DataStore') -> 'Value':
-        if self._binary_type == enums.BinaryType.Primitive:
-            primitive_class = primitive.Primitive.get_class(self._extra_info)
-            return primitive_class.read(fp)
-        # If it isn't a primitivev, then read a record byte from the stream
-        record_byte = fp.read(1)[0]
-        record_type = enums.RecordType(record_byte)
-        record_class = record.Record.get_class(record_type)
-        record_instance = record_class.read(fp)
-        if issubclass(record_class, record.ArrayRecord):
-            # TODO: Read the array data from the stream
-            pass
-        elif issubclass(record_class, record.ClassRecord):
-            class_record = record_instance  # type:ClassRecord
-            class_object = data_store.build_class(class_record)
-            class_instance = class_object.read_instance(fp, data_store, class_record.object_id)
-            data_store.objects[class_instance.object_id] = class_instance
-            return class_instance
-        return record_instance
 
     def __eq__(self, other: 'Any') -> bool:
         if type(other) is not Member:

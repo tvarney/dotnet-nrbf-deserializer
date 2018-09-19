@@ -2,7 +2,8 @@
 
 import argparse
 
-from dotnet.object import DataStore, PrimitiveArray, ClassInstance
+from dotnet.object import PrimitiveArray, ClassInstance
+from dotnet.io.binary import BinaryFormatter
 
 import typing
 if typing.TYPE_CHECKING:
@@ -13,7 +14,7 @@ if typing.TYPE_CHECKING:
 def inspect_classes(classes: 'Dict[Tuple[int, str], ClassObject]', libraries: 'Dict[int, str]'):
     print("Read {} classes".format(len(classes)))
     for class_key, class_obj in classes.items():
-        print("  Class {} [Library {}]".format(class_key[1], libraries[class_key[0]]))
+        print("  Class {}".format(class_key))
         for member in class_obj.members:
             extra_info = member.extra_info.name if member.binary_type == 0 else member.extra_info
             print("    {}: {}, {}".format(member.name, member.binary_type.name, extra_info))
@@ -61,7 +62,8 @@ if __name__ == "__main__":
         print("No input file specified")
         sys.exit(1)
 
-    ds = DataStore()
-    ds.read_file(args.file)
+    formatter = BinaryFormatter()
+    ds = formatter._data_store
+    formatter.read_file(args.file)
     inspect_classes(ds.classes, ds.libraries)
     inspect_objects(ds.objects)
