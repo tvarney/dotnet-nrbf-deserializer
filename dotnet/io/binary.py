@@ -334,6 +334,7 @@ class BinaryFormatter(base.Formatter):
                 inst = value  # type: Instance
                 if value_type is not objects.InstanceReference:
                     self._state.objects[inst.object_id] = inst
+                    self._data_store.objects[inst.object_id] = inst
 
         return True
 
