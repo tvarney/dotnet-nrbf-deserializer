@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import sys
 
 from dotnet.object import PrimitiveArray, ClassInstance
 from dotnet.io.binary import BinaryFormatter
@@ -11,7 +12,7 @@ if typing.TYPE_CHECKING:
     from dotnet.object import ClassObject, Instance
 
 
-def inspect_classes(classes: 'Dict[Tuple[int, str], ClassObject]', libraries: 'Dict[int, str]'):
+def inspect_classes(classes: 'Dict[Tuple[int, str], ClassObject]'):
     print("Read {} classes".format(len(classes)))
     for class_key, class_obj in classes.items():
         print("  Class {}".format(class_key))
@@ -51,9 +52,7 @@ def inspect_class_inst(inst: 'ClassInstance'):
         print("      {}: {}".format(inst.class_object.members[i].name, value))
 
 
-if __name__ == "__main__":
-    import sys
-
+def main():
     parser = argparse.ArgumentParser(description="NRBF Test Data Visualizer")
     parser.add_argument("--file", "-f", help="Data file to parse")
 
@@ -64,6 +63,10 @@ if __name__ == "__main__":
 
     formatter = BinaryFormatter()
     ds = formatter._data_store
-    formatter.read_file(args.file)
-    inspect_classes(ds.classes, ds.libraries)
+    value = formatter.read_file(args.file)
+    inspect_classes(ds.classes)
     inspect_objects(ds.objects)
+
+
+if __name__ == "__main__":
+    main()
