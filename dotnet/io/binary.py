@@ -79,7 +79,7 @@ class BinaryFormatter(base.Formatter):
                     member_info: 'Optional[MemberTypeInfo]') -> 'ClassObject':
         if member_info is None:
             partial = True
-            members = self._data_store.metadata.get((library.id, class_info.name.value), None)
+            members = self._data_store.metadata.get((library.id, class_info.name), None)
         else:
             partial = False
             member_count = len(class_info.members)
@@ -89,10 +89,10 @@ class BinaryFormatter(base.Formatter):
             members = list()  # type: List[objects.Member]
             for i in range(member_count):
                 members.append(objects.Member(
-                    i, class_info.members[i].value, member_info.binary_types[i], member_info.extra_info[i]
+                    i, class_info.members[i], member_info.binary_types[i], member_info.extra_info[i]
                 ))
 
-        class_obj = objects.ClassObject(class_info.name.value, members, partial, library, self._data_store)
+        class_obj = objects.ClassObject(class_info.name, members, partial, library, self._data_store)
         old_class_obj = self._data_store.classes.get(class_obj.key, None)
         if old_class_obj is None:
             self._data_store.classes[class_obj.key] = class_obj
@@ -124,7 +124,16 @@ class BinaryFormatter(base.Formatter):
             return primitives.Char(bytes_value + fp.read(1))
         return primitives.Char(bytes_value)
 
-    def read_class_instance(self, fp: 'BinaryIO', obj_id: int, class_obj: 'ClassObject') -> 'ClassInstance':
+    def read_class_info(self, fp: 'BinaryIO') -> 'structs.ClassInfo':
+        object_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        name = self.read_string_raw(fp)
+        member_count = int.from_bytes(fp.read(4), 'little', signed=True)
+        members = list()
+        for _ in range(member_count):
+            members.append(self.read_string_raw(fp))
+        return structs.ClassInfo(object_id, name, members)
+
+    def read_class_instance(self, fp: 'BinaryIO', state_obj_id: int, class_obj: 'ClassObject') -> 'ClassInstance':
         data = list()
         null_count = 0
         for member in class_obj.members:
@@ -150,9 +159,16 @@ class BinaryFormatter(base.Formatter):
                     if value is None:
                         raise ValueError("Member expected value, got nothing")
                     data.append(value)
+        obj_id = self._data_store.get_object_id()
         class_inst = objects.ClassInstance(obj_id, class_obj, data)
+        self.register_object(class_inst, state_obj_id)
 
         return class_inst
+
+    def read_class_type_info(self, fp: 'BinaryIO') -> 'structs.ClassTypeInfo':
+        class_name = self.read_string_raw(fp)
+        library_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        return structs.ClassTypeInfo(class_name, library_id)
 
     def read_class_with_id(self, fp: 'BinaryIO') -> 'ClassInstance':
         object_id = int.from_bytes(fp.read(4), 'little', signed=True)
@@ -165,19 +181,19 @@ class BinaryFormatter(base.Formatter):
         raise ValueError("ClassWithId references non-class instance for metadata")
 
     def read_class_full(self, fp: 'BinaryIO') -> 'ClassInstance':
-        class_info = structs.ClassInfo.read(fp)
-        member_type_info = structs.MemberTypeInfo.read(fp, len(class_info.members))
+        class_info = self.read_class_info(fp)
+        member_type_info = self.read_member_type_info(fp, class_info.members)
         state_library_id = int.from_bytes(fp.read(4), 'little', signed=True)
         library = self._state.libraries[state_library_id]
         class_obj = self.build_class(class_info, library, member_type_info)
-        return self.read_class_instance(fp, class_info.object_id.value, class_obj)
+        return self.read_class_instance(fp, class_info.object_id, class_obj)
 
     def read_class_partial(self, fp: 'BinaryIO') -> 'ClassInstance':
-        class_info = structs.ClassInfo.read(fp)
+        class_info = self.read_class_info(fp)
         library_id = int.from_bytes(fp.read(4), 'little', signed=True)
         library = self._state.libraries[library_id]
         class_obj = self.build_class(class_info, library, None)
-        return self.read_class_instance(fp, class_info.object_id.value, class_obj)
+        return self.read_class_instance(fp, class_info.object_id, class_obj)
 
     def read_decimal(self, fp: 'BinaryIO') -> 'Decimal':
         length = utils.read_multi_byte_int(fp)
@@ -186,6 +202,16 @@ class BinaryFormatter(base.Formatter):
                 raise ValueError("Negative length while reading decimal")
             length = 0
         return primitives.Decimal(fp.read(length).decode('utf-8'))
+
+    def read_extra_type_info(self, fp: 'BinaryIO', bin_type: 'enums.BinaryType') -> 'structs.ExtraInfoType':
+        if bin_type == enums.BinaryType.Primitive or bin_type == enums.BinaryType.PrimitiveArray:
+            byte_value = fp.read(1)[0]
+            return enums.PrimitiveType(byte_value)
+        elif bin_type == enums.BinaryType.SystemClass:
+            return self.read_string_raw(fp)
+        elif bin_type == enums.BinaryType.Class:
+            return self.read_class_type_info(fp)
+        return None
 
     def read_header(self, fp: 'BinaryIO', read_record_type: bool=True) -> 'Tuple[int, int, int, int]':
         if read_record_type:
@@ -218,14 +244,31 @@ class BinaryFormatter(base.Formatter):
         self._state.libraries[state_lib_id] = library
         return library
 
-    def read_null(self, fp: 'BinaryIO') -> None:
+    def read_member_type_info(self, fp: 'BinaryIO', member_list: 'List[str]') -> 'structs.MemberTypeInfo':
+        bin_types = list()
+        extra_info = list()
+        member_count = len(member_list)
+        for _ in range(member_count):
+            byte_value = fp.read(1)[0]
+            bin_type = enums.BinaryType(byte_value)
+            bin_types.append(bin_type)
+
+        for bin_type in bin_types:
+            extra_info.append(self.read_extra_type_info(fp, bin_type))
+
+        return structs.MemberTypeInfo(bin_types, extra_info)
+
+    @staticmethod
+    def read_null(_: 'BinaryIO') -> None:
         return None
 
-    def read_null_multiple(self, fp: 'BinaryIO') -> 'List[None]':
+    @staticmethod
+    def read_null_multiple(fp: 'BinaryIO') -> 'List[None]':
         count = int.from_bytes(fp.read(4), 'little', signed=True)
         return [None] * count
 
-    def read_null_multiple_256(self, fp: 'BinaryIO') -> 'List[None]':
+    @staticmethod
+    def read_null_multiple_256(fp: 'BinaryIO') -> 'List[None]':
         count = fp.read(1)[0]
         return [None] * count
 
@@ -258,8 +301,7 @@ class BinaryFormatter(base.Formatter):
 
         object_id = self._data_store.get_object_id()
         array = objects.ObjectArray(object_id, data)
-        self._state.objects[state_object_id] = array
-        self._data_store.objects[object_id] = array
+        self.register_object(array, state_object_id)
         return array
 
     def read_primitive(self, fp: 'BinaryIO') -> 'Primitive':
@@ -288,6 +330,7 @@ class BinaryFormatter(base.Formatter):
 
         object_id = self._data_store.get_object_id()
         array = objects.PrimitiveArray(object_id, type_class, values)
+        self.register_object(array, state_object_id)
         return array
 
     def read_primitive_class(self, fp: 'BinaryIO', primitive_class: 'Type[Primitive]') -> 'Primitive':
@@ -327,15 +370,7 @@ class BinaryFormatter(base.Formatter):
         read_fn = self._read_record_fn[record_type]
         if read_fn is None:
             raise NotImplementedError("Record read function not implemented for {}".format(record_type.name))
-        value = read_fn(fp)
-        if value is not None:
-            value_type = type(value)
-            if issubclass(value_type, objects.Instance):
-                inst = value  # type: Instance
-                if value_type is not objects.InstanceReference:
-                    self._state.objects[inst.object_id] = inst
-                    self._data_store.objects[inst.object_id] = inst
-
+        read_fn(fp)
         return True
 
     def read_reference(self, fp: 'BinaryIO') -> 'objects.InstanceReference':
@@ -345,30 +380,47 @@ class BinaryFormatter(base.Formatter):
         return reference
 
     def read_string(self, fp: 'BinaryIO') -> 'String':
+        return primitives.String(self.read_string_raw(fp))
+
+    def read_string_array(self, fp: 'BinaryIO') -> 'StringArray':
+        state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        length = int.from_bytes(fp.read(4), 'little', signed=True)
+
+        data = list()  # type: List[str]
+        for _ in range(length):
+            data.append(self.read_string_raw(fp))
+
+        object_id = self._data_store.get_object_id()
+        array = objects.StringArray(object_id, data)
+        self.register_object(array, state_object_id)
+        return array
+
+    def read_string_raw(self, fp: 'BinaryIO') -> str:
         length = utils.read_multi_byte_int(fp)
         if length < 0:
             if self._strict:
                 raise ValueError("Negative length while reading string")
             length = 0
-        return primitives.String(fp.read(length).decode('utf-8'))
-
-    def read_string_array(self, fp: 'BinaryIO') -> 'Instance':
-        # TODO: Change this to string specific code
-        return self.read_object_array(fp)
+        return fp.read(length).decode('utf-8')
 
     def read_system_class_full(self, fp: 'BinaryIO') -> 'ClassInstance':
-        class_info = structs.ClassInfo.read(fp)
-        member_type_info = structs.MemberTypeInfo.read(fp, len(class_info.members))
+        class_info = self.read_class_info(fp)
+        member_type_info = self.read_member_type_info(fp, class_info.members)
         library = self._data_store.libraries[-1]
         class_obj = self.build_class(class_info, library, member_type_info)
-        return self.read_class_instance(fp, class_info.object_id.value, class_obj)
+        return self.read_class_instance(fp, class_info.object_id, class_obj)
 
     def read_system_class_partial(self, fp: 'BinaryIO') -> 'ClassInstance':
-        class_info = structs.ClassInfo.read(fp)
+        class_info = self.read_class_info(fp)
         library = self._data_store.libraries[-1]
         class_obj = self.build_class(class_info, library, None)
-        return self.read_class_instance(fp, class_info.object_id.value, class_obj)
+        return self.read_class_instance(fp, class_info.object_id, class_obj)
+
+    def register_object(self, inst: 'Instance', state_object_id: int) -> None:
+        # TODO: Validate that the state_object_id and the instance's object_id aren't already in use
+        self._data_store.objects[inst.object_id] = inst
+        self._state.objects[state_object_id] = inst
+        self._state.object_id_map[state_object_id] = inst.object_id
 
     def write(self, fp: 'BinaryIO', value: 'Instance') -> None:
-        object_id = 1
-        library_id = 1
+        pass

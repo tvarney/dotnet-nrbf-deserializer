@@ -1,6 +1,5 @@
 
 import dotnet.enum as enums
-import dotnet.exceptions as exception
 import dotnet.primitives as primitive
 import dotnet.structures as structs
 import dotnet.utils as utils
@@ -278,8 +277,7 @@ class ClassObject(dotnet.value.Value):
 
 class Member(object):
     def __init__(self, index: int, name: str, bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType') -> None:
-        if not structs.ExtraTypeInfo.validate(bin_type, extra_type_info):
-            raise exception.InvalidExtraInfoValue(extra_type_info, bin_type)
+        structs.ExtraTypeInfo.check(bin_type, extra_type_info)
 
         self._index = int(index)
         self._name = str(name)
