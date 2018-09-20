@@ -107,6 +107,7 @@ class BinaryFormatter(base.Formatter):
         while self.read_record(fp):
             pass
 
+        self.resolve_references()
         return self._state.objects[self._state.root_id]
 
     def read_binary_array(self, fp: 'BinaryIO') -> 'Instance':
@@ -464,6 +465,15 @@ class BinaryFormatter(base.Formatter):
         self._data_store.objects[inst.object_id] = inst
         self._state.objects[state_object_id] = inst
         self._state.object_id_map[state_object_id] = inst.object_id
+
+    def resolve_references(self) -> None:
+        for ref in self._state.references:
+            ref.object_id = self._state.object_id_map[ref.object_id]
+
+        self._state.references.clear()
+
+    def root_object(self) -> 'Instance':
+        return self._state.objects[self._state.root_id]
 
     def write(self, fp: 'BinaryIO', value: 'Instance') -> None:
         pass
