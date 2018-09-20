@@ -110,7 +110,41 @@ class BinaryFormatter(base.Formatter):
         return self._state.objects[self._state.root_id]
 
     def read_binary_array(self, fp: 'BinaryIO') -> 'Instance':
-        pass
+        state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        array_type_byte = fp.read(1)[0]
+        array_type = enums.BinaryArrayType(array_type_byte)
+        rank = int.from_bytes(fp.read(4), 'little', signed=True)
+        if rank < 1:
+            raise ValueError("Invalid binary array rank {}".format(rank))
+
+        lengths = list()  # type: List[int]
+        for _ in range(rank):
+            length = int.from_bytes(fp.read(4), 'little', signed=True)
+            if length < 0:
+                raise ValueError("Invalid binary array length {}".format(length))
+            lengths.append(length)
+
+        offsets = None
+        if (array_type == enums.BinaryArrayType.JaggedOffset or array_type == enums.BinaryArrayType.RectangularOffset or
+                array_type == enums.BinaryArrayType.SingleOffset):
+            offsets = list()  # type: List[int]
+            for _ in range(rank):
+                offset = int.from_bytes(fp.read(4), 'little', signed=True)
+                offsets.append(offset)
+
+        bin_type_byte = fp.read(1)[0]
+        bin_type = enums.BinaryType(bin_type_byte)
+        additional_info = self.read_extra_type_info(fp, bin_type)
+        data = list()
+        if bin_type == enums.BinaryType.PrimitiveArray or bin_type == enums.BinaryType.Primitive:
+            for length in lengths:
+                for _ in range(length):
+                    data.append(self.read_primitive_type(fp, additional_info))
+
+        object_id = self._data_store.get_object_id()
+        array = objects.BinaryArray(object_id, rank, array_type, lengths, offsets, bin_type, additional_info, data)
+        self.register_object(array, state_object_id)
+        return array
 
     @staticmethod
     def read_char(fp: 'BinaryIO') -> 'Char':
@@ -325,8 +359,17 @@ class BinaryFormatter(base.Formatter):
         type_class = primitives.Primitive.get_class(type_enum)
         value_size = type_class.byte_size()
         values = list()
-        for _ in range(length):
-            values.append(type_class(fp.read(value_size)))
+        if value_size <= 0:
+            if type_enum == enums.PrimitiveType.Char:
+                for _ in range(length):
+                    values.append(self.read_char(fp))
+            else:
+                for _ in range(length):
+                    strlen = utils.read_multi_byte_int(fp)
+                    values.append(type_class(fp.read(strlen)))
+        else:
+            for _ in range(length):
+                values.append(type_class(fp.read(value_size)))
 
         object_id = self._data_store.get_object_id()
         array = objects.PrimitiveArray(object_id, type_class, values)

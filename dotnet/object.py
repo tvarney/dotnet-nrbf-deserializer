@@ -1,15 +1,14 @@
 
 import dotnet.enum as enums
-import dotnet.primitives as primitive
 import dotnet.structures as structs
 import dotnet.utils as utils
 import dotnet.value
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, Dict, List, Tuple, Union
-    from dotnet.enum import BinaryType
-    from dotnet.primitives import Int32, Int32Value, Primitive, PrimitiveValue
+    from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+    from dotnet.enum import BinaryType, BinaryArrayType
+    from dotnet.primitives import Primitive, PrimitiveValue
     from dotnet.structures import ExtraInfoType
     from dotnet.value import Value
 
@@ -55,16 +54,16 @@ class DataStore(object):
 
 
 class Instance(dotnet.value.Value):
-    def __init__(self, object_id: 'Int32Value') -> None:
-        self._object_id = utils.move(object_id, primitive.Int32)  # type: Int32
+    def __init__(self, object_id: int) -> None:
+        self._object_id = object_id
 
     @property
     def object_id(self) -> int:
-        return self._object_id.value
+        return self._object_id
 
     @object_id.setter
-    def object_id(self, new_object_id: 'Int32Value') -> None:
-        self._object_id.value = new_object_id
+    def object_id(self, new_object_id: int) -> None:
+        self._object_id = new_object_id
 
 
 class ArrayInstance(Instance):
@@ -72,7 +71,7 @@ class ArrayInstance(Instance):
 
 
 class InstanceReference(Instance):
-    def __init__(self, object_id: 'Int32Value', data_store: 'DataStore') -> None:
+    def __init__(self, object_id: int, data_store: 'DataStore') -> None:
         Instance.__init__(self, object_id)
         self._data_store = data_store
 
@@ -80,11 +79,25 @@ class InstanceReference(Instance):
         pass
 
     def resolve(self) -> 'Instance':
-        return self._data_store.objects[self._object_id.value]
+        return self._data_store.objects[self._object_id]
+
+
+class BinaryArray(ArrayInstance):
+    def __init__(self, object_id: int, rank: int, array_type: 'BinaryArrayType', lengths: 'List[int]',
+                 offsets: 'Optional[List[int]]', bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType',
+                 data: 'Optional[List[Value]]') -> None:
+        ArrayInstance.__init__(self, object_id)
+        self._rank = rank
+        self._array_type = array_type
+        self._lengths = lengths
+        self._offsets = offsets
+        self._bin_type = bin_type
+        self._extra_info = extra_type_info
+        self._data = data if data is not None else list()  # type: List[Value]
 
 
 class ObjectArray(ArrayInstance):
-    def __init__(self, object_id: 'Int32Value', data: 'List[Any]'):
+    def __init__(self, object_id: int, data: 'List[Union[Instance, InstanceReference]]'):
         ArrayInstance.__init__(self, object_id)
         self._data = data
 
@@ -93,13 +106,23 @@ class ObjectArray(ArrayInstance):
 
 
 class StringArray(ArrayInstance):
-    def __init__(self, object_id: 'Int32Value', data: 'List[Any]'):
+    def __init__(self, object_id: int, data: 'List[str]'):
         ArrayInstance.__init__(self, object_id)
         self._data = data
 
+    def __getitem__(self, index: int) -> str:
+        return self._data[index]
+
+    def __setitem__(self, index: int, value: str) -> None:
+        self._data[index] = str(value)
+
+    def __iter__(self) -> 'Iterator':
+        for item in self._data:
+            yield item
+
 
 class PrimitiveArray(ArrayInstance):
-    def __init__(self, object_id: 'Int32Value', primitive_class: type, data: 'List[Primitive]') -> None:
+    def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]') -> None:
         ArrayInstance.__init__(self, object_id)
         self._data_class = primitive_class
         self._data = data
@@ -123,7 +146,7 @@ class PrimitiveArray(ArrayInstance):
 
 
 class ClassInstance(Instance):
-    def __init__(self, object_id: 'Int32Value', class_object: 'ClassObject', member_data: 'List[Value]') -> None:
+    def __init__(self, object_id: int, class_object: 'ClassObject', member_data: 'List[Value]') -> None:
         Instance.__init__(self, object_id)
         self._class_object = class_object
         self._member_data = member_data
