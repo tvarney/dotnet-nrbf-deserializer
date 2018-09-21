@@ -1,7 +1,7 @@
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, Union
     from dotnet.enum import BinaryType, RecordType
     from dotnet.structures import ExtraInfoType
 
@@ -17,13 +17,21 @@ class ClassMethodNotImplemented(NotImplementedError):
 
 
 class RecordTypeError(IOError):
-    def __init__(self, expected: 'RecordType', found: 'RecordType'):
+    def __init__(self, expected: 'RecordType', found: 'RecordType') -> None:
         IOError.__init__(self, "Expected RecordType.{}, read RecordType.{}".format(expected.name, found.name))
 
 
 class InvalidExtraInfoValue(ValueError):
-    def __init__(self, extra_info_value: 'ExtraInfoType', binary_type: 'BinaryType'):
+    def __init__(self, extra_info_value: 'ExtraInfoType', binary_type: 'BinaryType') -> None:
         ValueError.__init__(self, "Invalid extra type info of type {} for BinaryType.{}".format(
             type(extra_info_value).__name__,
             binary_type.name
         ))
+
+
+class InvalidReferenceError(RuntimeError):
+    pass
+
+
+class NullReferenceError(InvalidReferenceError):
+    pass

@@ -1,5 +1,9 @@
 
+from abc import ABCMeta, abstractmethod
+import sys
+
 import dotnet.enum as enums
+import dotnet.exceptions as exceptions
 import dotnet.structures as structs
 import dotnet.utils as utils
 import dotnet.value
@@ -14,6 +18,14 @@ if typing.TYPE_CHECKING:
 
 
 class DataStore(object):
+    _DefaultDataStore = None
+
+    @staticmethod
+    def get_global() -> 'DataStore':
+        if DataStore._DefaultDataStore is None:
+            DataStore._DefaultDataStore = DataStore()
+        return DataStore._DefaultDataStore
+
     def __init__(self) -> None:
         self._next_lib_id = 1
         self._next_obj_id = 1
@@ -23,8 +35,6 @@ class DataStore(object):
         self._objects = dict()  # type: Dict[int, Instance]
         self._classes = dict()  # type: Dict[Tuple[int, str], ClassObject]
         self._known_metadata = dict()  # type: Dict[Tuple[int, str], List[Member]]
-
-        self._objects[0] = self._null
 
     @property
     def libraries(self) -> 'Dict[int, Library]':
@@ -53,9 +63,12 @@ class DataStore(object):
         return obj_id
 
 
-class Instance(dotnet.value.Value):
-    def __init__(self, object_id: int) -> None:
+class Instance(dotnet.value.Value, metaclass=ABCMeta):
+    def __init__(self, object_id: int, data_store: 'Optional[DataStore]'=None) -> None:
         self._object_id = object_id
+        self._data_store = data_store
+        if self._data_store is None:
+            self._data_store = DataStore.get_global()
 
     @property
     def object_id(self) -> int:
@@ -63,30 +76,113 @@ class Instance(dotnet.value.Value):
 
     @object_id.setter
     def object_id(self, new_object_id: int) -> None:
+        # TODO: Implement changing the object id within the data store
+        if new_object_id == 0:
+            raise ValueError("Can not set Instance object id to 0")
         self._object_id = new_object_id
 
+    @property
+    def data_store(self) -> 'DataStore':
+        return self._data_store
 
-class ArrayInstance(Instance):
+    @data_store.setter
+    def data_store(self, new_data_store: 'Optional[DataStore]') -> None:
+        # TODO: implement moving instances between data stores
+        self._data_store = new_data_store
+        if self._data_store is None:
+            self._data_store = DataStore.get_global()
+
+    def get_ref(self) -> 'InstanceReference':
+        # Create and then resolve the reference
+        ref = InstanceReference(self.object_id, self.data_store)
+        ref.resolve()
+        return ref
+
+    @abstractmethod
+    def __getitem__(self, key: 'Any') -> 'Any':
+        raise exceptions.MethodNotImplemented(self, "__getitem__()")
+
+    @abstractmethod
+    def __setitem__(self, key: 'Any', value: 'Any') -> None:
+        raise exceptions.MethodNotImplemented(self, "__setitem__()")
+
+    def __eq__(self, other: 'Any') -> bool:
+        if issubclass(type(other), Instance):
+            other: 'Instance'
+            return self._object_id == other._object_id
+        return False
+
+    def __ne__(self, other: 'Any') -> bool:
+        return not self.__eq__(other)
+
+
+class ArrayInstance(Instance, metaclass=ABCMeta):
     pass
 
 
-class InstanceReference(Instance):
-    def __init__(self, object_id: int, data_store: 'DataStore') -> None:
-        Instance.__init__(self, object_id)
-        self._data_store = data_store
+class InstanceReference(dotnet.value.Value):
+    PassThroughSpecialMethods = False
 
-    def data_store(self) -> 'DataStore':
-        pass
+    def __init__(self, object_id: int, data_store: 'Optional[DataStore]'=None) -> None:
+        self._object_id = object_id
+        self._data_store = data_store
+        if self._data_store is None:
+            self._data_store = DataStore.get_global()
+        self._instance = None
+
+    @property
+    def object_id(self) -> int:
+        return self._object_id
+
+    @object_id.setter
+    def object_id(self, new_object_id: int) -> None:
+        # TODO: Implement garbage collection on ref change
+        # We know which object is likely to be garbage collected, so all
+        # we have to do is check it's refcount; if the refcount is 3,
+        # then we know that it is dangling
+        #     1. This class
+        #     2. The sys.getrefcount() call
+        #     3. The objects property of the DataStore
+        self._object_id = new_object_id
 
     def resolve(self) -> 'Instance':
-        return self._data_store.objects[self._object_id]
+        if self._instance is None:
+            if self._object_id == 0:
+                raise exceptions.NullReferenceError("Can not resolve Null(0) reference")
+
+            try:
+                self._instance = self._data_store.objects[self._object_id]
+            except KeyError:
+                raise exceptions.InvalidReferenceError(self._object_id)
+        return self._instance
+
+    def __call__(self) -> 'Instance':
+        return self.resolve()
+
+    def __getitem__(self, key: 'Any') -> 'Any':
+        return self()[key]
+
+    def __setitem__(self, key: 'Any', value: 'Any') -> None:
+        self()[key] = value
+
+    def __repr__(self) -> str:
+        if InstanceReference.PassThroughSpecialMethods:
+            return repr(self.resolve())
+        return "InstanceReference({}, {})".format(self._object_id, self._data_store)
+
+    def __str__(self) -> str:
+        if InstanceReference.PassThroughSpecialMethods:
+            return str(self.resolve())
+        if self._object_id == 0:
+            return "Null"
+        return "Reference {}".format(hex(self._object_id))
 
 
 class BinaryArray(ArrayInstance):
     def __init__(self, object_id: int, rank: int, array_type: 'BinaryArrayType', lengths: 'List[int]',
                  offsets: 'Optional[List[int]]', bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType',
-                 data: 'Optional[List[Value]]') -> None:
-        ArrayInstance.__init__(self, object_id)
+                 data: 'Optional[List[Value]]', data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, object_id, data_store)
         self._rank = rank
         self._array_type = array_type
         self._lengths = lengths
@@ -95,19 +191,29 @@ class BinaryArray(ArrayInstance):
         self._extra_info = extra_type_info
         self._data = data if data is not None else list()  # type: List[Value]
 
+    def __getitem__(self, key: int) -> 'Value':
+        return self._data[key]
+
+    def __setitem__(self, key: int, value: 'Value') -> None:
+        self._data[key] = value
+
 
 class ObjectArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[Union[Instance, InstanceReference]]'):
-        ArrayInstance.__init__(self, object_id)
-        self._data = data
+    def __init__(self, object_id: int, data: 'List[InstanceReference]',
+                 data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, object_id, data_store)
+        self._data = data  # type: List[InstanceReference]
 
     def __getitem__(self, index: int) -> 'Any':
         return self._data[index]
 
+    def __setitem__(self, index: int, value: 'Union[Instance, InstanceReference]') -> None:
+        self._data[index].object_id = value.object_id
+
 
 class StringArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[str]'):
-        ArrayInstance.__init__(self, object_id)
+    def __init__(self, object_id: int, data: 'List[str]', data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, object_id, data_store)
         self._data = data
 
     def __getitem__(self, index: int) -> str:
@@ -122,8 +228,9 @@ class StringArray(ArrayInstance):
 
 
 class PrimitiveArray(ArrayInstance):
-    def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]') -> None:
-        ArrayInstance.__init__(self, object_id)
+    def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]',
+                 data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, object_id, data_store)
         self._data_class = primitive_class
         self._data = data
 
@@ -146,8 +253,9 @@ class PrimitiveArray(ArrayInstance):
 
 
 class ClassInstance(Instance):
-    def __init__(self, object_id: int, class_object: 'ClassObject', member_data: 'List[Value]') -> None:
-        Instance.__init__(self, object_id)
+    def __init__(self, object_id: int, class_object: 'ClassObject', member_data: 'List[Value]',
+                 data_store: 'Optional[DataStore]'=None) -> None:
+        Instance.__init__(self, object_id, data_store)
         self._class_object = class_object
         self._member_data = member_data
 
@@ -164,6 +272,11 @@ class ClassInstance(Instance):
             return self._member_data[key]
         member_idx = self._class_object.get_member(key).index
         return self._member_data[member_idx]
+
+    def __setitem__(self, key: 'Union[int, str]', value: 'Value') -> None:
+        if type(key) is str:
+            key = self._class_object.get_member(key).index
+        self._member_data[key] = value
 
 
 class Library(object):
@@ -232,7 +345,7 @@ class ClassObject(dotnet.value.Value):
     SystemClass = -1
 
     def __init__(self, name: str, members: 'List[Member]', partial: bool, library: 'Library',
-                 data_store: 'DataStore') -> None:
+                 data_store: 'Optional[DataStore]'=None) -> None:
         """Create a new Class object
 
         :param name: The name of the class
@@ -245,7 +358,7 @@ class ClassObject(dotnet.value.Value):
         self._members = members
         self._partial = bool(partial)
         self._library = library
-        self._data_store = data_store
+        self._data_store = data_store if data_store is not None else DataStore.get_global()
         self._lookup = dict()  # Dict[str, Member]
         for member in self._members:
             self._lookup[member.name] = member
