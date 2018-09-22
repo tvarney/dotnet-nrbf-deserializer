@@ -8,11 +8,11 @@ import dotnet.utils as utils
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import BinaryIO, Dict, List, Optional, Tuple, Type
+    from typing import BinaryIO, Dict, List, Optional, Tuple, Type, Union
 
     from dotnet.enum import PrimitiveType
-    from dotnet.object import ClassObject, ClassInstance, DataStore, Instance, Library, PrimitiveArray, \
-        ObjectArray, StringArray
+    from dotnet.object import ClassObject, ClassInstance, DataStore, Instance, InstanceReference, Library,\
+        PrimitiveArray, ObjectArray, StringArray
     from dotnet.primitives import Char, Decimal, Primitive, String
     from dotnet.structures import ClassInfo, MemberTypeInfo
 
@@ -29,6 +29,7 @@ class BinaryFormatter(base.Formatter):
             self.object_id_map = dict()  # type: Dict[int, int]
             self.library_id_map = dict()  # type: Dict[int, int]
             self.references = list()
+            self.reference_parents = list()
 
     @classmethod
     def binary(cls) -> bool:
@@ -166,6 +167,9 @@ class BinaryFormatter(base.Formatter):
                 for _ in range(length):
                     data.append(self.read_primitive_type(fp, additional_info))
 
+        # TODO: Read other types
+        # TODO: Add the binary array to the reference_parents list if it contains references
+
         object_id = self._data_store.get_object_id()
         array = objects.BinaryArray(object_id, rank, array_type, lengths, offsets, bin_type, additional_info, data)
         self.register_object(array, state_object_id)
@@ -222,6 +226,8 @@ class BinaryFormatter(base.Formatter):
         null_count = 0
         for member in class_obj.members:
             if null_count > 0:
+                if member.binary_type == enums.BinaryType.Primitive:
+                    raise ValueError("Encountered Null reference for primitive value")
                 data.append(None)
                 null_count -= 1
             elif member.binary_type == enums.BinaryType.Primitive:
@@ -229,19 +235,15 @@ class BinaryFormatter(base.Formatter):
             else:
                 record_byte = fp.read(1)[0]
                 record_type = enums.RecordType(record_byte)
-                if record_type == enums.RecordType.ObjectNullMultiple:
-                    null_count = int.from_bytes(fp.read(4), 'little', signed=True) - 1
-                    data.append(objects.InstanceReference(0, self._data_store))
-                elif record_type == enums.RecordType.ObjectNullMultiple256:
-                    null_count = fp.read(1)[0] - 1
-                    data.append(None)
-                elif record_type == enums.RecordType.ObjectNull:
-                    data.append(None)
+                read_fn = self._read_record_fn[record_type]
+                value = read_fn(fp)
+                value_type = type(value)
+                if value_type is structs.NullReferenceMultiple:
+                    nrm = value  # type: structs.NullReferenceMultiple
+                    null_count = len(nrm)
                 else:
-                    read_fn = self._read_record_fn[record_type]
-                    value = read_fn(fp)
-                    if value is None:
-                        raise ValueError("Member expected value, got nothing")
+                    if value_type is objects.InstanceReference:
+                        pass
                     data.append(value)
         obj_id = self._data_store.get_object_id()
         class_inst = objects.ClassInstance(obj_id, class_obj, data)
@@ -478,13 +480,12 @@ class BinaryFormatter(base.Formatter):
         protocol.
 
         :param _: The stream to read from
-        :return: A Null reference
+        :return: A literal None object
         """
-        # TODO: return the Null object from the DataStore of the stream
         return None
 
     @staticmethod
-    def read_null_multiple(fp: 'BinaryIO') -> 'List[None]':
+    def read_null_multiple(fp: 'BinaryIO') -> 'structs.NullReferenceMultiple':
         """Read a ObjectNullMultiple record from the stream
 
         This method implements the ObjectNullMultiple record of the NRBF
@@ -498,10 +499,10 @@ class BinaryFormatter(base.Formatter):
         """
         # TODO: Make this method return a generator
         count = int.from_bytes(fp.read(4), 'little', signed=True)
-        return [None] * count
+        return structs.NullReferenceMultiple(count)
 
     @staticmethod
-    def read_null_multiple_256(fp: 'BinaryIO') -> 'List[None]':
+    def read_null_multiple_256(fp: 'BinaryIO') -> 'structs.NullReferenceMultiple':
         """Read a ObjectNullMultiple256 record from the stream
 
         This method implements the ObjectNullMultiple256 record of the
@@ -515,7 +516,7 @@ class BinaryFormatter(base.Formatter):
         """
         # TODO: Make this method return a generator
         count = fp.read(1)[0]
-        return [None] * count
+        return structs.NullReferenceMultiple(count)
 
     def read_object_array(self, fp: 'BinaryIO') -> 'ObjectArray':
         """Read an object array from the stream
@@ -534,27 +535,28 @@ class BinaryFormatter(base.Formatter):
             length = 0
 
         data = list()
+        has_references = False
         count = 0
         while count < length:
             record_byte = fp.read(1)[0]
             record_type = enums.RecordType(record_byte)
-            if record_type == enums.RecordType.ObjectNullMultiple256:
-                null_count = fp.read(1)[0]
-                for _ in range(null_count):
-                    data.append(None)
-                count += null_count
-            elif record_type == enums.RecordType.ObjectNullMultiple:
-                null_count = int.from_bytes(fp.read(4), 'little', signed=True)
-                for _ in range(null_count):
-                    data.append(None)
-                count += null_count
+            read_fn = self._read_record_fn[record_type]
+            value = read_fn(fp)
+            if type(value) is structs.NullReferenceMultiple:
+                value: structs.NullReferenceMultiple
+                data.extend(value)
+                count += len(value)
             else:
-                read_fn = self._read_record_fn[record_type]
-                data.append(read_fn(fp))
+                value: 'Union[Instance, InstanceReference]'
+                data.append(value)
+                has_references = True
+                count += 1
 
         object_id = self._data_store.get_object_id()
         array = objects.ObjectArray(object_id, data)
         self.register_object(array, state_object_id)
+        if has_references:
+            self._state.reference_parents.append(self)
         return array
 
     def read_primitive(self, fp: 'BinaryIO') -> 'Primitive':
@@ -722,7 +724,7 @@ class BinaryFormatter(base.Formatter):
         :return: An InstanceReference
         """
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        reference = objects.InstanceReference(state_object_id, self._data_store)
+        reference = objects.InstanceReference(state_object_id, self._state.objects)
         self._state.references.append(reference)
         return reference
 
@@ -839,7 +841,6 @@ class BinaryFormatter(base.Formatter):
         :param state_object_id: The stream state object id of the object
         """
         # TODO: Validate that the state_object_id and the instance's object_id aren't already in use
-        self._data_store.objects[inst.object_id] = inst
         self._state.objects[state_object_id] = inst
         self._state.object_id_map[state_object_id] = inst.object_id
 

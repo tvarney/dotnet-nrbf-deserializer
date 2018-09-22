@@ -1,7 +1,7 @@
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, Union
+    from typing import Any
     from dotnet.enum import BinaryType, RecordType
     from dotnet.structures import ExtraInfoType
 

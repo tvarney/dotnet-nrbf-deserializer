@@ -1,6 +1,5 @@
 
 from abc import ABCMeta, abstractmethod
-import sys
 
 import dotnet.enum as enums
 import dotnet.exceptions as exceptions
@@ -29,20 +28,14 @@ class DataStore(object):
     def __init__(self) -> None:
         self._next_lib_id = 1
         self._next_obj_id = 1
-        self._null = InstanceReference(0, self)
 
         self._libraries = {-1: Library.SystemLibrary}  # type: Dict[int, Library]
-        self._objects = dict()  # type: Dict[int, Instance]
         self._classes = dict()  # type: Dict[Tuple[int, str], ClassObject]
         self._known_metadata = dict()  # type: Dict[Tuple[int, str], List[Member]]
 
     @property
     def libraries(self) -> 'Dict[int, Library]':
         return self._libraries
-
-    @property
-    def objects(self) -> 'Dict[int, Instance]':
-        return self._objects
 
     @property
     def classes(self) -> 'Dict[Tuple[int, str], ClassObject]':
@@ -64,11 +57,8 @@ class DataStore(object):
 
 
 class Instance(dotnet.value.Value, metaclass=ABCMeta):
-    def __init__(self, object_id: int, data_store: 'Optional[DataStore]'=None) -> None:
+    def __init__(self, object_id: int) -> None:
         self._object_id = object_id
-        self._data_store = data_store
-        if self._data_store is None:
-            self._data_store = DataStore.get_global()
 
     @property
     def object_id(self) -> int:
@@ -80,23 +70,6 @@ class Instance(dotnet.value.Value, metaclass=ABCMeta):
         if new_object_id == 0:
             raise ValueError("Can not set Instance object id to 0")
         self._object_id = new_object_id
-
-    @property
-    def data_store(self) -> 'DataStore':
-        return self._data_store
-
-    @data_store.setter
-    def data_store(self, new_data_store: 'Optional[DataStore]') -> None:
-        # TODO: implement moving instances between data stores
-        self._data_store = new_data_store
-        if self._data_store is None:
-            self._data_store = DataStore.get_global()
-
-    def get_ref(self) -> 'InstanceReference':
-        # Create and then resolve the reference
-        ref = InstanceReference(self.object_id, self.data_store)
-        ref.resolve()
-        return ref
 
     @abstractmethod
     def __getitem__(self, key: 'Any') -> 'Any':
@@ -121,14 +94,9 @@ class ArrayInstance(Instance, metaclass=ABCMeta):
 
 
 class InstanceReference(dotnet.value.Value):
-    PassThroughSpecialMethods = False
-
-    def __init__(self, object_id: int, data_store: 'Optional[DataStore]'=None) -> None:
+    def __init__(self, object_id: int, object_map: 'Optional[Dict[int, Instance]]'=None) -> None:
         self._object_id = object_id
-        self._data_store = data_store
-        if self._data_store is None:
-            self._data_store = DataStore.get_global()
-        self._instance = None
+        self._object_map = object_map
 
     @property
     def object_id(self) -> int:
@@ -136,25 +104,12 @@ class InstanceReference(dotnet.value.Value):
 
     @object_id.setter
     def object_id(self, new_object_id: int) -> None:
-        # TODO: Implement garbage collection on ref change
-        # We know which object is likely to be garbage collected, so all
-        # we have to do is check it's refcount; if the refcount is 3,
-        # then we know that it is dangling
-        #     1. This class
-        #     2. The sys.getrefcount() call
-        #     3. The objects property of the DataStore
         self._object_id = new_object_id
 
-    def resolve(self) -> 'Instance':
-        if self._instance is None:
-            if self._object_id == 0:
-                raise exceptions.NullReferenceError("Can not resolve Null(0) reference")
-
-            try:
-                self._instance = self._data_store.objects[self._object_id]
-            except KeyError:
-                raise exceptions.InvalidReferenceError(self._object_id)
-        return self._instance
+    def resolve(self) -> 'Optional[Instance]':
+        if self._object_id == 0:
+            return None
+        return self._object_map.get(self._object_id, None)
 
     def __call__(self) -> 'Instance':
         return self.resolve()
@@ -166,13 +121,9 @@ class InstanceReference(dotnet.value.Value):
         self()[key] = value
 
     def __repr__(self) -> str:
-        if InstanceReference.PassThroughSpecialMethods:
-            return repr(self.resolve())
-        return "InstanceReference({}, {})".format(self._object_id, self._data_store)
+        return "InstanceReference({})".format(self._object_id)
 
     def __str__(self) -> str:
-        if InstanceReference.PassThroughSpecialMethods:
-            return str(self.resolve())
         if self._object_id == 0:
             return "Null"
         return "Reference {}".format(hex(self._object_id))
@@ -181,8 +132,8 @@ class InstanceReference(dotnet.value.Value):
 class BinaryArray(ArrayInstance):
     def __init__(self, object_id: int, rank: int, array_type: 'BinaryArrayType', lengths: 'List[int]',
                  offsets: 'Optional[List[int]]', bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType',
-                 data: 'Optional[List[Value]]', data_store: 'Optional[DataStore]'=None) -> None:
-        ArrayInstance.__init__(self, object_id, data_store)
+                 data: 'Optional[List[Optional[Value]]]') -> None:
+        ArrayInstance.__init__(self, object_id)
         self._rank = rank
         self._array_type = array_type
         self._lengths = lengths
@@ -191,29 +142,28 @@ class BinaryArray(ArrayInstance):
         self._extra_info = extra_type_info
         self._data = data if data is not None else list()  # type: List[Value]
 
-    def __getitem__(self, key: int) -> 'Value':
+    def __getitem__(self, key: int) -> 'Optional[Value]':
         return self._data[key]
 
-    def __setitem__(self, key: int, value: 'Value') -> None:
+    def __setitem__(self, key: int, value: 'Optional[Value]') -> None:
         self._data[key] = value
 
 
 class ObjectArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[InstanceReference]',
-                 data_store: 'Optional[DataStore]'=None) -> None:
-        ArrayInstance.__init__(self, object_id, data_store)
+    def __init__(self, object_id: int, data: 'List[Union[Instance, InstanceReference, None]]') -> None:
+        ArrayInstance.__init__(self, object_id)
         self._data = data  # type: List[InstanceReference]
 
     def __getitem__(self, index: int) -> 'Any':
         return self._data[index]
 
-    def __setitem__(self, index: int, value: 'Union[Instance, InstanceReference]') -> None:
+    def __setitem__(self, index: int, value: 'Union[Instance, InstanceReference, None]') -> None:
         self._data[index].object_id = value.object_id
 
 
 class StringArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[str]', data_store: 'Optional[DataStore]'=None) -> None:
-        ArrayInstance.__init__(self, object_id, data_store)
+    def __init__(self, object_id: int, data: 'List[str]') -> None:
+        ArrayInstance.__init__(self, object_id)
         self._data = data
 
     def __getitem__(self, index: int) -> str:
@@ -228,9 +178,8 @@ class StringArray(ArrayInstance):
 
 
 class PrimitiveArray(ArrayInstance):
-    def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]',
-                 data_store: 'Optional[DataStore]'=None) -> None:
-        ArrayInstance.__init__(self, object_id, data_store)
+    def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]') -> None:
+        ArrayInstance.__init__(self, object_id)
         self._data_class = primitive_class
         self._data = data
 
@@ -253,9 +202,8 @@ class PrimitiveArray(ArrayInstance):
 
 
 class ClassInstance(Instance):
-    def __init__(self, object_id: int, class_object: 'ClassObject', member_data: 'List[Value]',
-                 data_store: 'Optional[DataStore]'=None) -> None:
-        Instance.__init__(self, object_id, data_store)
+    def __init__(self, object_id: int, class_object: 'ClassObject', member_data: 'List[Value]') -> None:
+        Instance.__init__(self, object_id)
         self._class_object = class_object
         self._member_data = member_data
 
@@ -341,7 +289,7 @@ class Library(object):
 Library.SystemLibrary = Library("System", system=True, library_id=-1)
 
 
-class ClassObject(dotnet.value.Value):
+class ClassObject(object):
     SystemClass = -1
 
     def __init__(self, name: str, members: 'List[Member]', partial: bool, library: 'Library',

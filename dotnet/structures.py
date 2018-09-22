@@ -82,3 +82,22 @@ class MemberTypeInfo(object):
     @property
     def extra_info(self) -> 'List[ExtraInfoType]':
         return self._extra_info
+
+
+class NullReferenceMultiple(object):
+    def __init__(self, count: int) -> None:
+        self._count = count
+
+    def __iter__(self) -> 'typing.Iterator':
+        for _ in range(self._count):
+            yield None
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __repr__(self) -> str:
+        return "NullReferenceMultiple({})".format(self._count)
+
+    def __str__(self) -> str:
+        return "[None]*{}".format(self._count)
+
