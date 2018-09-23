@@ -114,6 +114,9 @@ class ArrayInstance(Instance, metaclass=ABCMeta):
                         raise exceptions.InvalidReferenceError()
                     self._data[i] = new_value
 
+    def __str__(self) -> str:
+        return "[{}]".format(", ".join(str(value) for value in self._data))
+
 
 class InstanceReference(dotnet.value.Value):
     def __init__(self, object_id: int, object_map: 'Optional[Dict[int, Instance]]'=None) -> None:
