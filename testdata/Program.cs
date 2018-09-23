@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization.Formatters.Binary;
 
@@ -139,6 +140,13 @@ namespace TestData
         public string entityName;
         public int level;
         public ulong xp;
+
+        public Entity() : this("", 0, 0) { }
+        public Entity(string name, int level, ulong xp) {
+            entityName = name;
+            this.level = level;
+            this.xp = xp;
+        }
     }
 
     [Serializable]
@@ -159,6 +167,19 @@ namespace TestData
             this.width = width;
             this.height = height;
             this.tiles = new Tile[width, height];
+        }
+    }
+
+    [Serializable]
+    class GameData
+    {
+        public Map map;
+        public List<Entity> entities;
+
+        public GameData()
+        {
+            map = null;
+            entities = new List<Entity>();
         }
     }
 
@@ -185,11 +206,38 @@ namespace TestData
             bf.Serialize(fs, new BinaryArrays());
         }
 
+        public static void GameExample()
+        {
+            GameData gd = new GameData();
+            gd.map = new Map(10, 10);
+            for(int i = 1; i < 10; ++i) {
+                gd.map.tiles[0,i].tile_id = 1;
+                gd.map.tiles[9,i].tile_id = 2;
+                gd.map.tiles[i,0].tile_id = 3;
+                gd.map.tiles[i,9].tile_id = 4;
+            }
+            gd.map.tiles[0,0].tile_id = 5;
+            gd.map.tiles[0,9].tile_id = 6;
+            gd.map.tiles[9,0].tile_id = 7;
+            gd.map.tiles[9,9].tile_id = 8;
+
+            gd.entities.Add(new Entity());
+            gd.entities.Add(new Entity());
+
+            gd.map.tiles[2,3].entity = gd.entities[0];
+            gd.map.tiles[7,7].entity = gd.entities[1];
+
+            FileStream fs = new FileStream("./game_data.dat", FileMode.OpenOrCreate);
+            BinaryFormatter bf = new BinaryFormatter();
+            bf.Serialize(fs, gd);
+        }
+
         static void Main(string[] args)
         {
             Primitives();
             PrimitiveArrays();
             BinaryArrays();
+            GameExample();
         }
     }
 }
