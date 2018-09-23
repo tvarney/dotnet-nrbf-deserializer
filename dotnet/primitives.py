@@ -9,7 +9,7 @@ import dotnet.value
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, List, Tuple, Type, Union
+    from typing import Any, List, Optional, Tuple, Type, Union
     from dotnet.enum import PrimitiveType
 
     BooleanValue = Union[bool, bytes, 'Boolean']
@@ -128,8 +128,8 @@ class Boolean(Primitive):
             return value.value
         return bool(value)
 
-    def __init__(self, value: 'BooleanValue') -> None:
-        self._value = Boolean.convert(value)
+    def __init__(self, value: 'Optional[BooleanValue]'=None) -> None:
+        self._value = Boolean.convert(value if value is not None else False)
 
     @property
     def value(self) -> bool:
@@ -169,8 +169,8 @@ class Byte(Primitive):
             return value.value
         raise TypeError("Byte must be one of bytes, int, or Byte")
 
-    def __init__(self, value: 'ByteValue') -> None:
-        self._value = Byte.convert(value)
+    def __init__(self, value: 'Optional[ByteValue]'=None) -> None:
+        self._value = Byte.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -211,8 +211,8 @@ class Char(Primitive):
             return value.value
         raise TypeError("Char must be one of bytes, int, str, or Char")
 
-    def __init__(self, value: 'CharValue') -> None:
-        self._value = Char.convert(value)
+    def __init__(self, value: 'Optional[CharValue]'=None) -> None:
+        self._value = Char.convert(value if value is not None else "\x00")
 
     @property
     def value(self) -> str:
@@ -272,8 +272,8 @@ class DateTime(Primitive):
             ticks = ticks & 0x1FFFFFFFFFFFFFFF
         return ticks
 
-    def __init__(self, value: 'DateTimeValue') -> None:
-        self._ticks, self._kind = DateTime.convert(value)
+    def __init__(self, value: 'Optional[DateTimeValue]'=None) -> None:
+        self._ticks, self._kind = DateTime.convert(value if value is not None else 0)
 
     @property
     def value(self) -> 'Tuple[int, DateTime.Kind]':
@@ -459,8 +459,8 @@ class Decimal(Primitive):
             return value.value
         raise TypeError("Decimal value must be one of int, float, str, bytes, or Decimal")
 
-    def __init__(self, value: 'DecimalValue') -> None:
-        self._value = Decimal.convert(value)
+    def __init__(self, value: 'Optional[DecimalValue]'=None) -> None:
+        self._value = Decimal.convert(value if value is not None else 0)
 
     @property
     def value(self) -> str:
@@ -496,8 +496,8 @@ class Double(Primitive):
             return struct.unpack('d', value)[0]
         raise TypeError("Double must be one of float, bytes, or Double")
 
-    def __init__(self, value: 'DoubleValue') -> None:
-        self._value = Double.convert(value)
+    def __init__(self, value: 'Optional[DoubleValue]'=None) -> None:
+        self._value = Double.convert(value if value is not None else 0.0)
 
     @property
     def value(self) -> float:
@@ -537,8 +537,8 @@ class Int8(Primitive):
             return value.value
         raise TypeError("Int8 must be one of int, bytes, Int8")
 
-    def __init__(self, value: 'Int8Value') -> None:
-        self._value = Int8.convert(value)
+    def __init__(self, value: 'Optional[Int8Value]'=None) -> None:
+        self._value = Int8.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -578,8 +578,8 @@ class Int16(Primitive):
             return value.value
         raise TypeError("Int16 must be one of int, bytes, Int16")
 
-    def __init__(self, value: 'Int16Value') -> None:
-        self._value = Int16.convert(value)
+    def __init__(self, value: 'Optional[Int16Value]'=None) -> None:
+        self._value = Int16.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -619,8 +619,8 @@ class Int32(Primitive):
             return int(value)
         raise TypeError("Int32 must be one of int, bytes, or Int32")
 
-    def __init__(self, value: 'Int32Value') -> None:
-        self._value = Int32.convert(value)
+    def __init__(self, value: 'Optional[Int32Value]'=None) -> None:
+        self._value = Int32.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -660,8 +660,8 @@ class Int64(Primitive):
             return int(value)
         raise TypeError("Int64 must be one of int, bytes, or Int64")
 
-    def __init__(self, value: 'Int64Value') -> None:
-        self._value = Int64.convert(value)
+    def __init__(self, value: 'Optional[Int64Value]'=None) -> None:
+        self._value = Int64.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -698,8 +698,8 @@ class String(Primitive):
             return value[read:].decode('utf-8')
         raise TypeError("String must be one of str, bytes, or LengthPrefixedString")
 
-    def __init__(self, value: 'StringValue') -> None:
-        self._value = String.convert(value)
+    def __init__(self, value: 'Optional[StringValue]'=None) -> None:
+        self._value = String.convert(value if value is not None else "")
 
     @property
     def value(self) -> str:
@@ -734,8 +734,8 @@ class Single(Primitive):
             return struct.unpack("f", new_value)[0]
         raise TypeError("Single must be one of float, bytes, or Single")
 
-    def __init__(self, value: 'SingleValue') -> None:
-        self._value = Single.convert(value)
+    def __init__(self, value: 'Optional[SingleValue]'=None) -> None:
+        self._value = Single.convert(value if value is not None else 0.0)
 
     @property
     def value(self) -> float:
@@ -775,8 +775,8 @@ class TimeSpan(Primitive):
             return int(value)
         raise TypeError("TimeSpan must be one of int, bytes, or TimeSpan")
 
-    def __init__(self, value: 'TimeSpanValue') -> None:
-        self._value = TimeSpan.convert(value)
+    def __init__(self, value: 'Optional[TimeSpanValue]'=None) -> None:
+        self._value = TimeSpan.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -816,8 +816,8 @@ class UInt16(Primitive):
             return int(value)
         raise TypeError("UInt16 must be one of int, bytes, or UInt16")
 
-    def __init__(self, value: 'UInt16Value') -> None:
-        self._value = UInt16.convert(value)
+    def __init__(self, value: 'Optional[UInt16Value]'=None) -> None:
+        self._value = UInt16.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -857,8 +857,8 @@ class UInt32(Primitive):
             return int(value)
         raise TypeError("UInt32 must be one of int, bytes, or UInt32")
 
-    def __init__(self, value: 'UInt32Value') -> None:
-        self._value = UInt32.convert(value)
+    def __init__(self, value: 'Optional[UInt32Value]'=None) -> None:
+        self._value = UInt32.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
@@ -898,8 +898,8 @@ class UInt64(Primitive):
             return int(value)
         raise TypeError("UInt64 must be one of int, bytes, or UInt64")
 
-    def __init__(self, value: 'UInt64Value') -> None:
-        self._value = UInt64.convert(value)
+    def __init__(self, value: 'Optional[UInt64Value]'=None) -> None:
+        self._value = UInt64.convert(value if value is not None else 0)
 
     @property
     def value(self) -> int:
