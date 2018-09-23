@@ -1,4 +1,6 @@
 
+import functools
+
 import dotnet.enum as enums
 import dotnet.io.base as base
 import dotnet.primitives as primitives
@@ -143,11 +145,13 @@ class BinaryFormatter(base.Formatter):
         if rank < 1:
             raise ValueError("Invalid binary array rank {}".format(rank))
 
+        total_length = 1
         lengths = list()  # type: List[int]
         for _ in range(rank):
             length = int.from_bytes(fp.read(4), 'little', signed=True)
             if length < 0:
                 raise ValueError("Invalid binary array length {}".format(length))
+            total_length *= length
             lengths.append(length)
 
         offsets = None
@@ -163,9 +167,8 @@ class BinaryFormatter(base.Formatter):
         additional_info = self.read_extra_type_info(fp, bin_type)
         data = list()
         if bin_type == enums.BinaryType.PrimitiveArray or bin_type == enums.BinaryType.Primitive:
-            for length in lengths:
-                for _ in range(length):
-                    data.append(self.read_primitive_type(fp, additional_info))
+            for _ in range(total_length):
+                data.append(self.read_primitive_type(fp, additional_info))
 
         # TODO: Read other types
         # TODO: Add the binary array to the reference_parents list if it contains references
