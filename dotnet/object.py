@@ -72,6 +72,10 @@ class Instance(dotnet.value.Value, metaclass=ABCMeta):
         self._object_id = new_object_id
 
     @abstractmethod
+    def resolve_references(self, object_map: 'Dict[int, Instance]', strict: bool=True) -> None:
+        raise exceptions.MethodNotImplemented(self, "resolve_references()")
+
+    @abstractmethod
     def __getitem__(self, key: 'Any') -> 'Any':
         raise exceptions.MethodNotImplemented(self, "__getitem__()")
 
@@ -90,7 +94,25 @@ class Instance(dotnet.value.Value, metaclass=ABCMeta):
 
 
 class ArrayInstance(Instance, metaclass=ABCMeta):
-    pass
+    def __init__(self, object_id: int, data: 'List[Any]') -> None:
+        Instance.__init__(self, object_id)
+        self._data = data
+
+    @property
+    def data(self) -> 'List[Any]':
+        return self._data
+
+    def resolve_references(self, object_map: 'Dict[int, Instance]', strict: bool=True) -> None:
+        for i, value in enumerate(self._data):
+            if type(value) is InstanceReference:
+                ref = value  # type: InstanceReference
+                if ref.object_id == 0:
+                    self._data[i] = None
+                else:
+                    new_value = object_map.get(ref.object_id, None)
+                    if new_value is None and strict:
+                        raise exceptions.InvalidReferenceError()
+                    self._data[i] = new_value
 
 
 class InstanceReference(dotnet.value.Value):
@@ -133,14 +155,41 @@ class BinaryArray(ArrayInstance):
     def __init__(self, object_id: int, rank: int, array_type: 'BinaryArrayType', lengths: 'List[int]',
                  offsets: 'Optional[List[int]]', bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType',
                  data: 'Optional[List[Optional[Value]]]') -> None:
-        ArrayInstance.__init__(self, object_id)
+        data_array = data if data is not None else list()
+        ArrayInstance.__init__(self, object_id, data_array)
         self._rank = rank
         self._array_type = array_type
         self._lengths = lengths
         self._offsets = offsets
         self._bin_type = bin_type
         self._extra_info = extra_type_info
-        self._data = data if data is not None else list()  # type: List[Value]
+        self._default_value = None
+        if self._bin_type == enums.BinaryType.Primitive:
+            pass
+
+    @property
+    def rank(self) -> int:
+        return self._rank
+
+    @property
+    def array_type(self) -> 'BinaryArrayType':
+        return self._array_type
+
+    @property
+    def lengths(self) -> 'List[int]':
+        return self._lengths
+
+    @property
+    def offsets(self) -> 'List[int]':
+        return self._offsets
+
+    @property
+    def binary_type(self) -> 'BinaryType':
+        return self._bin_type
+
+    @property
+    def extra_type_info(self) -> 'ExtraInfoType':
+        return self._extra_info
 
     def __getitem__(self, key: int) -> 'Optional[Value]':
         return self._data[key]
@@ -151,8 +200,7 @@ class BinaryArray(ArrayInstance):
 
 class ObjectArray(ArrayInstance):
     def __init__(self, object_id: int, data: 'List[Union[Instance, InstanceReference, None]]') -> None:
-        ArrayInstance.__init__(self, object_id)
-        self._data = data  # type: List[InstanceReference]
+        ArrayInstance.__init__(self, object_id, data)
 
     def __getitem__(self, index: int) -> 'Any':
         return self._data[index]
@@ -163,8 +211,7 @@ class ObjectArray(ArrayInstance):
 
 class StringArray(ArrayInstance):
     def __init__(self, object_id: int, data: 'List[str]') -> None:
-        ArrayInstance.__init__(self, object_id)
-        self._data = data
+        ArrayInstance.__init__(self, object_id, data)
 
     def __getitem__(self, index: int) -> str:
         return self._data[index]
@@ -179,9 +226,8 @@ class StringArray(ArrayInstance):
 
 class PrimitiveArray(ArrayInstance):
     def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]') -> None:
-        ArrayInstance.__init__(self, object_id)
+        ArrayInstance.__init__(self, object_id, data)
         self._data_class = primitive_class
-        self._data = data
 
     @property
     def primitive_class(self) -> type:
@@ -214,6 +260,15 @@ class ClassInstance(Instance):
     @property
     def member_data(self) -> 'List[Value]':
         return self._member_data
+
+    def resolve_references(self, object_map: 'Dict[int, Instance]', strict: bool=True) -> None:
+        for i, member_data in enumerate(self._member_data):
+            if type(member_data) is InstanceReference:
+                ref = member_data  # type: InstanceReference
+                new_value = object_map.get(ref.object_id, None)
+                if new_value is None and strict:
+                    raise exceptions.InvalidReferenceError()
+                self._member_data[i] = new_value
 
     def __getitem__(self, key: 'Union[int, str]') -> 'Value':
         if type(key) is int:
