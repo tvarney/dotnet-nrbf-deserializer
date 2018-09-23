@@ -225,6 +225,7 @@ class BinaryFormatter(base.Formatter):
         """
         data = list()
         null_count = 0
+        references = False
         for member in class_obj.members:
             if null_count > 0:
                 if member.binary_type == enums.BinaryType.Primitive:
@@ -244,12 +245,13 @@ class BinaryFormatter(base.Formatter):
                     null_count = len(nrm)
                 else:
                     if value_type is objects.InstanceReference:
-                        pass
+                        references = True
                     data.append(value)
         obj_id = self._data_store.get_object_id()
         class_inst = objects.ClassInstance(obj_id, class_obj, data)
         self.register_object(class_inst, state_obj_id)
-
+        if references:
+            self._state.reference_parents.append(class_inst)
         return class_inst
 
     def read_class_type_info(self, fp: 'BinaryIO') -> 'structs.ClassTypeInfo':
@@ -856,16 +858,9 @@ class BinaryFormatter(base.Formatter):
         BinaryFormatter.read() method.
         """
         for ref_parent in self._state.reference_parents:
-            ref_parent.resolve_references()
+            ref_parent.resolve_references(self._state.objects)
 
         self._state.references.clear()
-
-    def root_object(self) -> 'Instance':
-        """Get the root object of the most recently read message
-
-        :return: The root object
-        """
-        return self._state.objects[self._state.root_id]
 
     def write(self, fp: 'BinaryIO', value: 'Instance') -> None:
         pass
