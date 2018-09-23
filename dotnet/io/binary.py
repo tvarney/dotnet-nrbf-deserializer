@@ -163,17 +163,28 @@ class BinaryFormatter(base.Formatter):
         bin_type_byte = fp.read(1)[0]
         bin_type = enums.BinaryType(bin_type_byte)
         additional_info = self.read_extra_type_info(fp, bin_type)
+        references = False
         data = list()
-        if bin_type == enums.BinaryType.PrimitiveArray or bin_type == enums.BinaryType.Primitive:
+        if bin_type == enums.BinaryType.Primitive:
             for _ in range(total_length):
                 data.append(self.read_primitive_type(fp, additional_info))
-
-        # TODO: Read other types
-        # TODO: Add the binary array to the reference_parents list if it contains references
+        else:
+            for _ in range(total_length):
+                record_type_byte = fp.read(1)[0]
+                record_type = enums.RecordType(record_type_byte)
+                read_fn = self._read_record_fn[record_type]
+                if read_fn is None:
+                    raise ValueError("Unexpected record {} while reading binary array members".format(record_type.name))
+                value = read_fn(fp)
+                if type(value) is objects.InstanceReference:
+                    references = True
+                data.append(value)
 
         object_id = self._data_store.get_object_id()
         array = objects.BinaryArray(object_id, rank, array_type, lengths, offsets, bin_type, additional_info, data)
         self.register_object(array, state_object_id)
+        if references:
+            self._state.reference_parents.append(array)
         return array
 
     @staticmethod
