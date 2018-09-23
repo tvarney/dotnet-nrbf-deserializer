@@ -5,7 +5,7 @@ using System.Runtime.Serialization.Formatters.Binary;
 namespace TestData
 {
     [Serializable]
-    public struct Primitives
+    public class Primitives
     {
         public bool bool_v;
         public byte byte_v;
@@ -45,7 +45,7 @@ namespace TestData
     }
 
     [Serializable]
-    public struct PrimitiveArrays
+    public class PrimitiveArrays
     {
         public bool[] bools;
         public byte[] bytes;
@@ -99,6 +99,65 @@ namespace TestData
     }
 
     [Serializable]
+    public class BinaryArrays {
+        public int[,] rect;
+        public int[,] rectOffset;
+        //public int[][] jagged;
+        //public Array jaggedOffset;
+        //public Array single;
+        //public Array singleOffset;
+
+        public BinaryArrays() : this(5) { }
+
+        public BinaryArrays(int size)
+        {
+            rect = new int[size,size];
+            rectOffset = (int[,])Array.CreateInstance(typeof(int), new int[]{size, size}, new int[]{1,1});
+            for(int i = 0; i < size; ++i) {
+                for(int j = 0; j < size; ++j) {
+                    rect[i,j] = i*10 + j;
+                    rectOffset[i+1, j+1] = i*10 + j;
+                }
+            }
+
+            /*
+            jagged = new int[size][];
+            jaggedOffset = Array.CreateInstance(typeof(Array), new int[]{size}, new int[]{1});
+            for(int i = 0; i < size; ++i) {
+                jagged[i] = new int[i + 2];
+                Array subarray = Array.CreateInstance(typeof(int), new int[]{size}, new int[]{1});
+                for(int j = 0; j < i + 2; ++j) {
+                    jagged[i][j] = j;
+                    try {
+                        subarray.SetValue(j, j + 1);
+                    }catch(Exception e) {
+                        Console.WriteLine("Exception at: subarray[{0}] = {1}\n{2}", j + 1, j, e);
+                    }
+                }
+                try {
+                    jaggedOffset.SetValue(subarray, i + 1);
+                }catch(Exception e) {
+                    Console.WriteLine("Exception assigning subarray {0} to jaggedOffset[{1}]:\n{2}", i, i + 1, e);
+                }
+            }
+            */
+
+            /*
+            single = Array.CreateInstance(typeof(int), size);
+            singleOffset = Array.CreateInstance(typeof(int), new int[]{size}, new int[]{1});
+            for(int i = 0; i < size; ++i) {
+                single.SetValue(i, i);
+                try {
+                    singleOffset.SetValue(i, i + 1);
+                }catch(Exception e) {
+                    Console.WriteLine("Exception assigning to singleOffset[{0}]:\n{1}", i+1, e);
+                }
+            }
+            */
+        }
+    }
+
+    [Serializable]
     public class Entity
     {
         public string entityName;
@@ -143,10 +202,18 @@ namespace TestData
             bf.Serialize(fs, new PrimitiveArrays(5));
         }
 
+        public static void BinaryArrays()
+        {
+            FileStream fs = new FileStream("./binary_arrays.dat", FileMode.OpenOrCreate);
+            BinaryFormatter bf = new BinaryFormatter();
+            bf.Serialize(fs, new BinaryArrays());
+        }
+
         static void Main(string[] args)
         {
             Primitives();
             PrimitiveArrays();
+            BinaryArrays();
         }
     }
 }
