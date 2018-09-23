@@ -3,6 +3,7 @@
 import argparse
 import sys
 
+import dotnet.object as objects
 from dotnet.object import PrimitiveArray, ClassInstance
 from dotnet.io.binary import BinaryFormatter
 
@@ -21,13 +22,6 @@ def inspect_classes(classes: 'Dict[Tuple[int, str], ClassObject]'):
             print("    {}: {}, {}".format(member.name, member.binary_type.name, extra_info))
 
 
-def inspect_objects(objects: 'Dict[int, Instance]'):
-    print("Read {} objects".format(len(objects)))
-    for obj_id, obj in objects.items():
-        print("  object[{}]: {}".format(obj_id, type(obj).__name__))
-        inspect_instance(obj)
-
-
 def inspect_instance(instance: 'Instance') -> None:
     instance_type = type(instance)
     if instance_type is ClassInstance:
@@ -39,6 +33,7 @@ def inspect_instance(instance: 'Instance') -> None:
 
 
 def inspect_primitive_array(inst: 'PrimitiveArray') -> None:
+    print("Primitive Array")
     print("    Data Type: {}".format(inst.primitive_class.__name__))
     print("    Values:")
     for i, value in enumerate(inst):
@@ -46,6 +41,7 @@ def inspect_primitive_array(inst: 'PrimitiveArray') -> None:
 
 
 def inspect_class_inst(inst: 'ClassInstance'):
+    print("Class Instance")
     print("    Class: {}".format(inst.class_object.name))
     print("    Members:")
     for i, value in enumerate(inst.member_data):
@@ -61,11 +57,11 @@ def main():
         print("No input file specified")
         sys.exit(1)
 
-    formatter = BinaryFormatter()
-    ds = formatter._data_store
+    ds = objects.DataStore.get_global()
+    formatter = BinaryFormatter(ds)
     value = formatter.read_file(args.file)
     inspect_classes(ds.classes)
-    inspect_objects(ds.objects)
+    inspect_instance(value)
 
 
 if __name__ == "__main__":
