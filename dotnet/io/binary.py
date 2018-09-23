@@ -1,6 +1,4 @@
 
-import functools
-
 import dotnet.enum as enums
 import dotnet.io.base as base
 import dotnet.primitives as primitives
@@ -857,8 +855,8 @@ class BinaryFormatter(base.Formatter):
         This method is called automatically by the
         BinaryFormatter.read() method.
         """
-        for ref in self._state.references:
-            ref.object_id = self._state.object_id_map[ref.object_id]
+        for ref_parent in self._state.reference_parents:
+            ref_parent.resolve_references()
 
         self._state.references.clear()
 
