@@ -102,10 +102,8 @@ namespace TestData
     public class BinaryArrays {
         public int[,] rect;
         public int[,] rectOffset;
-        //public int[][] jagged;
-        //public Array jaggedOffset;
-        //public Array single;
-        //public Array singleOffset;
+        public int[][] jagged;
+        public Array singleOffset;
 
         public BinaryArrays() : this(5) { }
 
@@ -120,40 +118,18 @@ namespace TestData
                 }
             }
 
-            /*
             jagged = new int[size][];
-            jaggedOffset = Array.CreateInstance(typeof(Array), new int[]{size}, new int[]{1});
             for(int i = 0; i < size; ++i) {
                 jagged[i] = new int[i + 2];
-                Array subarray = Array.CreateInstance(typeof(int), new int[]{size}, new int[]{1});
                 for(int j = 0; j < i + 2; ++j) {
                     jagged[i][j] = j;
-                    try {
-                        subarray.SetValue(j, j + 1);
-                    }catch(Exception e) {
-                        Console.WriteLine("Exception at: subarray[{0}] = {1}\n{2}", j + 1, j, e);
-                    }
-                }
-                try {
-                    jaggedOffset.SetValue(subarray, i + 1);
-                }catch(Exception e) {
-                    Console.WriteLine("Exception assigning subarray {0} to jaggedOffset[{1}]:\n{2}", i, i + 1, e);
                 }
             }
-            */
 
-            /*
-            single = Array.CreateInstance(typeof(int), size);
             singleOffset = Array.CreateInstance(typeof(int), new int[]{size}, new int[]{1});
             for(int i = 0; i < size; ++i) {
-                single.SetValue(i, i);
-                try {
-                    singleOffset.SetValue(i, i + 1);
-                }catch(Exception e) {
-                    Console.WriteLine("Exception assigning to singleOffset[{0}]:\n{1}", i+1, e);
-                }
+                singleOffset.SetValue(i, i + 1);
             }
-            */
         }
     }
 
