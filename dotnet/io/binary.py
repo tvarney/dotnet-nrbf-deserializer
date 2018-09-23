@@ -169,7 +169,8 @@ class BinaryFormatter(base.Formatter):
             for _ in range(total_length):
                 data.append(self.read_primitive_type(fp, additional_info))
         else:
-            for _ in range(total_length):
+            count = 0
+            while count < total_length:
                 record_type_byte = fp.read(1)[0]
                 record_type = enums.RecordType(record_type_byte)
                 read_fn = self._read_record_fn[record_type]
@@ -178,7 +179,17 @@ class BinaryFormatter(base.Formatter):
                 value = read_fn(fp)
                 if type(value) is objects.InstanceReference:
                     references = True
-                data.append(value)
+                    data.append(value)
+                elif type(value) is structs.NullReferenceMultiple:
+                    nrm = value  # type: structs.NullReferenceMultiple
+                    data.extend(nrm)
+                    count += len(nrm)
+                elif type(value) is objects.ClassInstance:
+                    ci = value  # type: ClassInstance
+                    # TODO: Mark the underlying ClassObject as a ValueType
+                    data.append(ci)
+                else:
+                    data.append(value)
 
         object_id = self._data_store.get_object_id()
         array = objects.BinaryArray(object_id, rank, array_type, lengths, offsets, bin_type, additional_info, data)
