@@ -1,4 +1,4 @@
-
+@echo off
 if exist %WINDIR%\Microsoft.NET\Framework\v4.0.30319\Microsoft.Net.Compilers.2.9.0/tools/csc.exe (
     %WINDIR%\Microsoft.NET\Framework\v4.0.30319\Microsoft.Net.Compilers.2.9.0\tools\csc.exe Program.cs
 ) else (
