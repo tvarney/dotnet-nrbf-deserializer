@@ -231,12 +231,19 @@ namespace TestData
             BinaryFormatter bf = new BinaryFormatter();
             bf.Serialize(fs, gd);
         }
+        public static void EmptyString()
+        {
+            FileStream fs = new FileStream("./empty_string.dat", FileMode.OpenOrCreate);
+            BinaryFormatter bf = new BinaryFormatter();
+            bf.Serialize(fs, new Entity("", 1, 2));
+        }
 
         static void Main(string[] args)
         {
             Primitives();
             PrimitiveArrays();
             BinaryArrays();
+            EmptyString();
             GameExample();
         }
     }
