@@ -466,9 +466,9 @@ class BinaryFormatter(base.Formatter):
         :return: A Library instance
         """
         state_lib_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        str_value = self.read_string(fp)
+        str_value = self.read_string_raw(fp)
         # TODO: check if we have a library which matches this one already
-        library = objects.Library.parse_string(str_value.value)
+        library = objects.Library.parse_string(str_value)
         library.id = self._data_store.get_library_id()
         self._state.library_id_map[state_lib_id] = library.id
         self._state.libraries[state_lib_id] = library
@@ -762,7 +762,11 @@ class BinaryFormatter(base.Formatter):
         :param fp: The stream to read the string from
         :return: A String primitive
         """
-        return primitives.String(self.read_string_raw(fp))
+        object_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        value = primitives.String(self.read_string_raw(fp))
+        # TODO: Make a StringInstance?
+        self._state.objects[object_id] = value
+        return value
 
     def read_string_array(self, fp: 'BinaryIO') -> 'StringArray':
         """Read an array of strings from the stream
@@ -813,7 +817,8 @@ class BinaryFormatter(base.Formatter):
             if self._strict:
                 raise ValueError("Negative length while reading string")
             length = 0
-        return fp.read(length).decode('utf-8')
+        str_value = fp.read(length).decode('utf-8')
+        return str_value
 
     def read_system_class_full(self, fp: 'BinaryIO') -> 'ClassInstance':
         """Read a system class instance from the stream
