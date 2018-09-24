@@ -791,13 +791,20 @@ class BinaryFormatter(base.Formatter):
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
         length = int.from_bytes(fp.read(4), 'little', signed=True)
 
-        data = list()  # type: List[str]
-        for _ in range(length):
+        data = list()  # type: List[Optional[str]]
+        while len(data) < length:
             record_type_byte = fp.read(1)[0]
             record_type = enums.RecordType(record_type_byte)
-            if record_type != enums.RecordType.BinaryObjectString:
-                raise ValueError("Expected string, got {}".format(record_type.name))
-            data.append(self.read_string_raw(fp))
+            if record_type == enums.RecordType.BinaryObjectString:
+                data.append(self.read_string(fp).value)
+            elif record_type == enums.RecordType.ObjectNull:
+                data.append(None)
+            elif record_type == enums.RecordType.ObjectNullMultiple:
+                data.extend(self.read_null_multiple(fp))
+            elif record_type == enums.RecordType.ObjectNullMultiple256:
+                data.extend(self.read_null_multiple_256(fp))
+            else:
+                raise ValueError("Expected string or Null, got {}".format(record_type.name))
 
         object_id = self._data_store.get_object_id()
         array = objects.StringArray(object_id, data)

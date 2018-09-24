@@ -213,14 +213,14 @@ class ObjectArray(ArrayInstance):
 
 
 class StringArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[str]') -> None:
+    def __init__(self, object_id: int, data: 'List[Optional[str]]') -> None:
         ArrayInstance.__init__(self, object_id, data)
 
-    def __getitem__(self, index: int) -> str:
+    def __getitem__(self, index: int) -> 'Optional[str]':
         return self._data[index]
 
-    def __setitem__(self, index: int, value: str) -> None:
-        self._data[index] = str(value)
+    def __setitem__(self, index: int, value: 'Optional[str]') -> None:
+        self._data[index] = value
 
     def __iter__(self) -> 'Iterator':
         for item in self._data:
