@@ -882,7 +882,8 @@ class BinaryFormatter(base.Formatter):
         :param inst: The object to register
         :param state_object_id: The stream state object id of the object
         """
-        # TODO: Validate that the state_object_id and the instance's object_id aren't already in use
+        if state_object_id in self._state.objects.keys():
+            raise ValueError("Object with ID {} already read from stream".format(state_object_id))
         self._state.objects[state_object_id] = inst
 
     def resolve_references(self) -> None:
