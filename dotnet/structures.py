@@ -27,6 +27,13 @@ class ExtraTypeInfo(object):
         if not ExtraTypeInfo.validate(bin_type, value):
             raise exceptions.InvalidExtraInfoValue(value, bin_type)
 
+    @staticmethod
+    def inspect(bin_type: 'BinaryType', value: 'ExtraInfoType') -> str:
+        if bin_type == enums.BinaryType.Primitive or bin_type == enums.BinaryType.PrimitiveArray:
+            if type(value) is enums.PrimitiveType:
+                return value.name
+        return str(value)
+
     def __init__(self) -> None:
         raise NotImplementedError("ExtraTypeInfo::__init__() not implemented")
 
@@ -50,6 +57,12 @@ class ClassTypeInfo(object):
     def library_id(self) -> int:
         return self._library_id
 
+    def __repr__(self) -> str:
+        return "ClassTypeInfo({}, {})".format(self._class_name, self._library_id)
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 class ClassInfo(object):
     def __init__(self, object_id: int, name: str, members: 'List[str]') -> None:
@@ -69,6 +82,12 @@ class ClassInfo(object):
     def members(self) -> 'List[str]':
         return self._members
 
+    def __repr__(self) -> str:
+        return "ClassInfo({}, {}, {})".format(self._object_id, self._name, repr(self._members))
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 class MemberTypeInfo(object):
     def __init__(self, bin_types: 'List[BinaryType]', extra_info: 'List[ExtraInfoType]') -> None:
@@ -82,6 +101,19 @@ class MemberTypeInfo(object):
     @property
     def extra_info(self) -> 'List[ExtraInfoType]':
         return self._extra_info
+
+    def __repr__(self) -> str:
+        return "MemberTypeInfo({}, {})".format(self._bin_types, self._extra_info)
+
+    def __str__(self) -> str:
+        return "[{}]".format(
+            ", ".join(
+                "({}, {})".format(
+                    self._bin_types[i].name,
+                    ExtraTypeInfo.inspect(self._bin_types[i], self._extra_info[i])
+                ) for i in range(len(self._bin_types))
+            )
+        )
 
 
 class NullReferenceMultiple(object):

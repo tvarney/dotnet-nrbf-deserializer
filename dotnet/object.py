@@ -75,6 +75,12 @@ class Instance(dotnet.value.Value, metaclass=ABCMeta):
     def resolve_references(self, object_map: 'Dict[int, Instance]', strict: bool=True) -> None:
         raise exceptions.MethodNotImplemented(self, "resolve_references()")
 
+    def __repr__(self) -> str:
+        return "Instance({})".format(self._object_id)
+
+    def __str__(self) -> str:
+        return "<Instance: {}>".format(self._object_id)
+
     @abstractmethod
     def __getitem__(self, key: 'Any') -> 'Any':
         raise exceptions.MethodNotImplemented(self, "__getitem__()")
@@ -116,6 +122,9 @@ class ArrayInstance(Instance, metaclass=ABCMeta):
 
     def __str__(self) -> str:
         return "[{}]".format(", ".join(str(value) for value in self._data))
+
+    def __repr__(self) -> str:
+        return "{}({}, {})".format(type(self).__name__, self._object_id, self._data)
 
 
 class InstanceReference(dotnet.value.Value):
@@ -200,6 +209,12 @@ class BinaryArray(ArrayInstance):
     def __setitem__(self, key: int, value: 'Optional[Value]') -> None:
         self._data[key] = value
 
+    def __repr__(self) -> str:
+        return "BinaryArray({}, {}, {}, {}, {}, {}, {}, {})".format(
+            self._object_id, self._rank, self._array_type, self._lengths, self._offsets, self._bin_type,
+            self._extra_info, self._data
+        )
+
 
 class ObjectArray(ArrayInstance):
     def __init__(self, object_id: int, data: 'List[Union[Instance, InstanceReference, None]]') -> None:
@@ -248,6 +263,9 @@ class PrimitiveArray(ArrayInstance):
     def __iter__(self):
         for value in self._data:
             yield value
+
+    def __repr__(self) -> str:
+        return "PrimitiveArray({}, {}, {})".format(self._object_id, self._data_class, self._data)
 
 
 class ClassInstance(Instance):
@@ -306,7 +324,6 @@ class Library(object):
         self._system = bool(options.pop("system", False))
         self._options = options
         self._library_id = options.pop("library_id", -1)
-        # TODO: Validate the library id (may truncate)
 
     @property
     def name(self) -> str:
@@ -334,14 +351,21 @@ class Library(object):
         return self._options[key]
 
     def __str__(self) -> str:
-        return "[{}]".format(
-            self._name + ', '.join("{}={}".format(key, value) for key, value in self._options.items())
-        )
+        options = [self._name]
+        for key, value in self._options.items():
+            options.append("{}={}".format(key, repr(value)))
+        return "[{}]".format(", ".join(options))
 
     def __repr__(self) -> str:
-        return "Library({})".format(
-            self._name + ', '.join("{}={}".format(key, repr(value)) for key, value in self._options.items())
-        )
+        options = [self._name]
+        for key, value in self._options.items():
+            options.append("{}={}".format(key, repr(value)))
+        if self._system:
+            options.append("system=True")
+        if self._library_id != -1:
+            options.append("library_id={}".format(self._library_id))
+
+        return "Library({})".format(", ".join(options))
 
 
 Library.SystemLibrary = Library("System", system=True, library_id=-1)
@@ -425,6 +449,15 @@ class ClassObject(object):
     def __ne__(self, other: 'Any') -> bool:
         return not self.__eq__(other)
 
+    def __repr__(self) -> str:
+        return "ClassObject({}, {}, {}, {}, {})".format(
+            repr(self._name), repr(self._members), repr(self._partial),
+            repr(self._library), repr(self._data_store)
+        )
+
+    def __str__(self) -> str:
+        return "<Class: {}, {}>".format(self._name, str(self._library))
+
 
 class Member(object):
     def __init__(self, index: int, name: str, bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType') -> None:
@@ -461,3 +494,12 @@ class Member(object):
 
     def __ne__(self, other: 'Any') -> bool:
         return not self.__eq__(other)
+
+    def __repr__(self) -> str:
+        return "Member({}, {}, BinaryType.{}, {})".format(
+            self._index, repr(self._name), self._binary_type.name,
+            structs.ExtraTypeInfo.inspect(self._binary_type, self._extra_info)
+        )
+
+    def __str__(self) -> str:
+        return self.__repr__()
