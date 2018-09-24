@@ -8,7 +8,7 @@ import dotnet.utils as utils
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import BinaryIO, Dict, List, Optional, Tuple, Type, Union
+    from typing import BinaryIO, Dict, List, Optional, Tuple, Type
 
     from dotnet.enum import PrimitiveType
     from dotnet.object import ClassObject, ClassInstance, DataStore, Instance, InstanceReference, Library,\
@@ -26,10 +26,18 @@ class BinaryFormatter(base.Formatter):
             self.minor_version = 0
             self.objects = dict()  # type: Dict[int, Instance]
             self.libraries = dict()  # type: Dict[int, Library]
-            self.object_id_map = dict()  # type: Dict[int, int]
             self.library_id_map = dict()  # type: Dict[int, int]
-            self.references = list()
             self.reference_parents = list()
+
+        def reset(self) -> None:
+            self.root_id = 0
+            self.header_id = 0
+            self.major_version = 0
+            self.minor_version = 0
+            self.objects.clear()
+            self.libraries.clear()
+            self.library_id_map.clear()
+            self.reference_parents.clear()
 
     @classmethod
     def binary(cls) -> bool:
@@ -119,13 +127,15 @@ class BinaryFormatter(base.Formatter):
         :param fp: The binary stream to read records from
         :return: The root object from the stream
         """
-        # TODO: Reset the state each time this is called
+        self._state.reset()
         self.read_header(fp, True)
         while self.read_record(fp):
             pass
 
         self.resolve_references()
-        return self._state.objects[self._state.root_id]
+        root_value = self._state.objects[self._state.root_id]
+        self._state.reset()
+        return root_value
 
     def read_binary_array(self, fp: 'BinaryIO') -> 'objects.BinaryArray':
         """Read a binary array from the stream
@@ -184,7 +194,7 @@ class BinaryFormatter(base.Formatter):
                     data.extend(nrm)
                 elif type(value) is objects.ClassInstance:
                     ci = value  # type: ClassInstance
-                    # TODO: Mark the underlying ClassObject as a ValueType
+                    ci.class_object.value_type = True
                     data.append(ci)
                 else:
                     data.append(value)
@@ -520,7 +530,6 @@ class BinaryFormatter(base.Formatter):
         :param fp: The stream to read from
         :return: A list of Null references
         """
-        # TODO: Make this method return a generator
         count = int.from_bytes(fp.read(4), 'little', signed=True)
         return structs.NullReferenceMultiple(count)
 
@@ -537,7 +546,6 @@ class BinaryFormatter(base.Formatter):
         :param fp:
         :return:
         """
-        # TODO: Make this method return a generator
         count = fp.read(1)[0]
         return structs.NullReferenceMultiple(count)
 
@@ -559,21 +567,24 @@ class BinaryFormatter(base.Formatter):
 
         data = list()
         has_references = False
-        count = 0
-        while count < length:
+        while len(data) < length:
             record_byte = fp.read(1)[0]
             record_type = enums.RecordType(record_byte)
             read_fn = self._read_record_fn[record_type]
             value = read_fn(fp)
-            if type(value) is structs.NullReferenceMultiple:
+            value_type = type(value)
+            if value_type is structs.NullReferenceMultiple:
                 value: structs.NullReferenceMultiple
                 data.extend(value)
-                count += len(value)
             else:
-                value: 'Union[Instance, InstanceReference]'
+                if value_type is InstanceReference:
+                    value: 'InstanceReference'
+                    has_references = True
+                elif value_type is ClassInstance:
+                    value: 'ClassInstance'
+                    value.class_object.value_type = True
+
                 data.append(value)
-                has_references = True
-                count += 1
 
         object_id = self._data_store.get_object_id()
         array = objects.ObjectArray(object_id, data)
@@ -619,9 +630,6 @@ class BinaryFormatter(base.Formatter):
         :return: A PrimitiveArray instance
         """
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        if state_object_id in self._state.object_id_map.keys():
-            raise KeyError("Duplicate object id in stream")
-
         length = int.from_bytes(fp.read(4), 'little', signed=True)
         if length < 0:
             if self._strict:
@@ -748,7 +756,6 @@ class BinaryFormatter(base.Formatter):
         """
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
         reference = objects.InstanceReference(state_object_id, self._state.objects)
-        self._state.references.append(reference)
         return reference
 
     def read_string(self, fp: 'BinaryIO') -> 'String':
@@ -870,7 +877,6 @@ class BinaryFormatter(base.Formatter):
         """
         # TODO: Validate that the state_object_id and the instance's object_id aren't already in use
         self._state.objects[state_object_id] = inst
-        self._state.object_id_map[state_object_id] = inst.object_id
 
     def resolve_references(self) -> None:
         """Resolve all unresolved references
@@ -885,7 +891,7 @@ class BinaryFormatter(base.Formatter):
         for ref_parent in self._state.reference_parents:
             ref_parent.resolve_references(self._state.objects)
 
-        self._state.references.clear()
+        self._state.reference_parents.clear()
 
     def write(self, fp: 'BinaryIO', value: 'Instance') -> None:
         pass

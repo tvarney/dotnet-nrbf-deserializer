@@ -364,6 +364,7 @@ class ClassObject(object):
         self._members = members
         self._partial = bool(partial)
         self._library = library
+        self._value_type = False
         self._data_store = data_store if data_store is not None else DataStore.get_global()
         self._lookup = dict()  # Dict[str, Member]
         for member in self._members:
@@ -388,6 +389,14 @@ class ClassObject(object):
     @property
     def partial(self) -> bool:
         return self._partial
+
+    @property
+    def value_type(self) -> bool:
+        return self._value_type
+
+    @value_type.setter
+    def value_type(self, is_value_type: bool) -> None:
+        self._value_type = bool(is_value_type)
 
     @property
     def key(self) -> 'Tuple[int, str]':
