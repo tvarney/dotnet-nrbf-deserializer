@@ -302,6 +302,12 @@ class ClassInstance(Instance):
             key = self._class_object.get_member(key).index
         self._member_data[key] = value
 
+    def __repr__(self) -> str:
+        return "ClassInstance({}, {}, {})".format(self._object_id, repr(self._class_object), repr(self._member_data))
+
+    def __str__(self) -> str:
+        return "<{} Instance: {}>".format(self._class_object.name, self.object_id)
+
 
 class Library(object):
     NoId = -1
