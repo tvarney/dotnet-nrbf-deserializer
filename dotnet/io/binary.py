@@ -829,7 +829,10 @@ class BinaryFormatter(base.Formatter):
             if self._strict:
                 raise ValueError("Negative length while reading string")
             length = 0
-        str_value = fp.read(length).decode('utf-8')
+        bytes_string = fp.read(length)
+        if len(bytes_string) != length:
+            raise IOError("Unexpected EOF while reading string value")
+        str_value = bytes_string.decode('utf-8')
         return str_value
 
     def read_system_class_full(self, fp: 'BinaryIO') -> 'ClassInstance':
