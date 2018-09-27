@@ -13,7 +13,7 @@ if typing.TYPE_CHECKING:
     from dotnet.enum import PrimitiveType
     from dotnet.object import ClassObject, ClassInstance, DataStore, Instance, InstanceReference, Library,\
         PrimitiveArray, ObjectArray, StringArray
-    from dotnet.primitives import Char, Decimal, Primitive, String
+    from dotnet.primitives import Char, Decimal, Primitive
     from dotnet.structures import ClassInfo, MemberTypeInfo
 
 
@@ -680,7 +680,7 @@ class BinaryFormatter(base.Formatter):
             if primitive_type is primitives.Decimal:
                 return self.read_decimal(fp)
             if primitive_type is primitives.String:
-                return self.read_string(fp)
+                return primitives.String(self.read_string_raw(fp))
             raise TypeError()
         byte_value = fp.read(size)
         return utils.move(byte_value, primitive_class)
@@ -707,7 +707,7 @@ class BinaryFormatter(base.Formatter):
             if primitive_type == enums.PrimitiveType.Char:
                 return self.read_char(fp)
             if primitive_type == enums.PrimitiveType.String:
-                return self.read_string(fp)
+                return primitives.String(self.read_string_raw(fp))
             if primitive_type == enums.PrimitiveType.Decimal:
                 return self.read_decimal(fp)
             raise TypeError()
