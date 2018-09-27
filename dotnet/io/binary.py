@@ -758,7 +758,7 @@ class BinaryFormatter(base.Formatter):
         reference = objects.InstanceReference(state_object_id, self._state.objects)
         return reference
 
-    def read_string(self, fp: 'BinaryIO') -> 'String':
+    def read_string(self, fp: 'BinaryIO') -> 'objects.StringInstance':
         """Read a String primitive from the stream
 
         This method implements the BinaryObjectString record of the NRBF
@@ -767,10 +767,11 @@ class BinaryFormatter(base.Formatter):
         :param fp: The stream to read the string from
         :return: A String primitive
         """
-        object_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        value = primitives.String(self.read_string_raw(fp))
-        # TODO: Make a StringInstance?
-        self._state.objects[object_id] = value
+        state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        str_value = self.read_string_raw(fp)
+        object_id = self._data_store.get_object_id()
+        value = objects.StringInstance(object_id, str_value)
+        self._state.objects[state_object_id] = value
         return value
 
     def read_string_array(self, fp: 'BinaryIO') -> 'StringArray':

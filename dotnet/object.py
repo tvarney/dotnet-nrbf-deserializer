@@ -309,6 +309,40 @@ class ClassInstance(Instance):
         return "<{} Instance: {}>".format(self._class_object.name, self.object_id)
 
 
+class StringInstance(Instance):
+    def __init__(self, object_id: int, str_data: str):
+        Instance.__init__(self, object_id)
+        self._data = str_data
+
+    @property
+    def value(self) -> str:
+        return self._data
+
+    @value.setter
+    def value(self, new_str_value: str) -> None:
+        self._data = str(new_str_value)
+
+    def resolve_references(self, object_map: 'Dict[int, Instance]', strict: bool=True) -> None:
+        pass
+
+    def __str__(self) -> str:
+        return self._data
+
+    def __repr__(self) -> str:
+        return "StringInstance({}, {})".format(self._object_id, self._data)
+
+    def __getitem__(self, key: 'Any') -> str:
+        if key == 0 or key == 'data':
+            return self._data
+        raise KeyError("Invalid key {} on String Instance".format(key))
+
+    def __setitem__(self, key: 'Any', value: str) -> None:
+        if key == 0 or key == 'data':
+            self._data = str(value)
+        else:
+            raise KeyError("Invalid key {} on String Instance".format(key))
+
+
 class Library(object):
     NoId = -1
 
