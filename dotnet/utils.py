@@ -103,24 +103,27 @@ def read_multi_byte_int(fp: 'BinaryIO') -> int:
     :param fp: The stream to read
     :return: The decoded unsigned integer
     """
-    byte_str = fp.read(1)
-    if not (byte_str[0] & 0x80):
-        return decode_multi_byte_int(byte_str)[1]
+    try:
+        byte_str = fp.read(1)
+        if not (byte_str[0] & 0x80):
+            return decode_multi_byte_int(byte_str)[1]
 
-    byte_str += fp.read(1)
-    if not (byte_str[1] & 0x80):
-        return decode_multi_byte_int(byte_str)[1]
+        byte_str += fp.read(1)
+        if not (byte_str[1] & 0x80):
+            return decode_multi_byte_int(byte_str)[1]
 
-    byte_str += fp.read(1)
-    if not (byte_str[2] & 0x80):
-        return decode_multi_byte_int(byte_str)[1]
+        byte_str += fp.read(1)
+        if not (byte_str[2] & 0x80):
+            return decode_multi_byte_int(byte_str)[1]
 
-    byte_str += fp.read(1)
-    if not (byte_str[3] & 0x80):
-        return decode_multi_byte_int(byte_str)[1]
+        byte_str += fp.read(1)
+        if not (byte_str[3] & 0x80):
+            return decode_multi_byte_int(byte_str)[1]
 
-    byte_str += fp.read(1)
-    return decode_multi_byte_int(byte_str)[1]
+        byte_str += fp.read(1)
+        return decode_multi_byte_int(byte_str)[1]
+    except IndexError:
+        raise IOError("Unexpected EOF while reading multi-byte int")
 
 
 def move(instance: 'Any', requested_type: 'type') -> 'Any':
