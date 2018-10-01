@@ -238,6 +238,16 @@ namespace TestData
             bf.Serialize(fs, new Entity("", 1, 2));
         }
 
+        public static void StringArray()
+        {
+            FileStream fs = new FileStream("./string_array.dat", FileMode.OpenOrCreate);
+            BinaryFormatter bf = new BinaryFormatter();
+            String[] strings = {
+                "Hello World", "This is a test string", null, "", null, null, null, "Hello World", ""
+            };
+            bf.Serialize(fs, strings);
+        }
+
         static void Main(string[] args)
         {
             Primitives();
@@ -245,6 +255,7 @@ namespace TestData
             BinaryArrays();
             EmptyString();
             GameExample();
+            StringArray();
         }
     }
 }
