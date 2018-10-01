@@ -770,7 +770,7 @@ class TimeSpan(Primitive):
         if value_type is bytes:
             if len(value) != 8:
                 raise ValueError("TimeSpan requires 8 bytes to unpack")
-            return int.from_bytes(value, 'little', signed=False)
+            return int.from_bytes(value, 'little', signed=True)
         if value_type is TimeSpan:
             return int(value)
         raise TypeError("TimeSpan must be one of int, bytes, or TimeSpan")
