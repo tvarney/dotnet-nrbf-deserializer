@@ -1,4 +1,6 @@
 
+import struct
+
 import dotnet.enum as enums
 import dotnet.io.base as base
 import dotnet.primitives as primitives
@@ -8,12 +10,13 @@ import dotnet.utils as utils
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import BinaryIO, Dict, List, Optional, Tuple, Type
+    from typing import Any, BinaryIO, Dict, List, Optional, Set, Tuple, Type, Union
 
     from dotnet.enum import PrimitiveType
     from dotnet.object import ClassObject, ClassInstance, DataStore, Instance, InstanceReference, Library,\
-        PrimitiveArray, ObjectArray, StringArray
-    from dotnet.primitives import Char, Decimal, Primitive
+        PrimitiveArray, ObjectArray, StringArray, StringInstance
+    from dotnet.primitives import Boolean, Byte, Char, DateTime, Decimal, Double, Int8, Int16, Int32, Int64, \
+        Primitive, String, Single, TimeSpan, UInt16, UInt32, UInt64
     from dotnet.structures import ClassInfo, MemberTypeInfo
 
 
@@ -39,6 +42,35 @@ class BinaryFormatter(base.Formatter):
             self.library_id_map.clear()
             self.reference_parents.clear()
 
+    class WriteState(object):
+        def __init__(self) -> None:
+            self.object_map = dict()  # type: Dict[int, int]
+            self.class_set = set()    # type: Set[ClassObject]
+            self.library_map = dict()  # type: Dict[Library, int]
+            self.object_cache = list()  # type: List[Instance]
+            self._next_obj_id = 1
+            self._next_inline_obj_id = -1
+
+        def get_object_id(self, item: 'Any', do_not_cache: bool=False, inline_definition: bool=False) -> int:
+            item_id = id(item)
+            object_id = self.object_map.get(item_id, 0)
+            if object_id != 0:
+                return object_id
+
+            if inline_definition:
+                object_id = self._next_inline_obj_id
+                self._next_inline_obj_id += 1
+                # TODO: Check for 32-bit signed overflow
+            else:
+                self.object_cache.append(item)
+                object_id = self._next_obj_id
+                self._next_obj_id += 1
+
+            if not do_not_cache:
+                self.object_map[item_id] = object_id
+
+            return object_id
+
     @classmethod
     def binary(cls) -> bool:
         return True
@@ -50,6 +82,7 @@ class BinaryFormatter(base.Formatter):
             ds = data_store
         self._data_store = ds
         self._state = BinaryFormatter.ReadState()
+        self._write_state = BinaryFormatter.WriteState()
         self._strict = not bool(kwargs.pop("permissive", False))
         self._read_record_fn = [
             self.read_header,
@@ -72,9 +105,30 @@ class BinaryFormatter(base.Formatter):
             self.read_string_array,
             None,
             None,
-            None,
+            None,  # TODO: Add an error function for gaps
             None,
             None
+        ]
+        self._write_primitive_lookup = [
+            None,  # TODO: Add an error function for gaps
+            self.write_bool,
+            self.write_byte,
+            self.write_char,
+            None,
+            self.write_decimal,
+            self.write_double,
+            self.write_int16,
+            self.write_int32,
+            self.write_int64,
+            self.write_int8,
+            self.write_single,
+            self.write_time_span,
+            self.write_date_time,
+            self.write_uint16,
+            self.write_uint32,
+            self.write_uint64,
+            self.write_null,
+            self.write_string
         ]
 
     def build_class(self, class_info: 'ClassInfo', library: 'Library',
@@ -199,8 +253,8 @@ class BinaryFormatter(base.Formatter):
                 else:
                     data.append(value)
 
-        object_id = self._data_store.get_object_id()
-        array = objects.BinaryArray(object_id, rank, array_type, lengths, offsets, bin_type, additional_info, data)
+        array = objects.BinaryArray(rank, array_type, lengths, offsets, bin_type, additional_info, data,
+                                    self._data_store)
         self.register_object(array, state_object_id)
         if references:
             self._state.reference_parents.append(array)
@@ -277,8 +331,7 @@ class BinaryFormatter(base.Formatter):
                     if value_type is objects.InstanceReference:
                         references = True
                     data.append(value)
-        obj_id = self._data_store.get_object_id()
-        class_inst = objects.ClassInstance(obj_id, class_obj, data)
+        class_inst = objects.ClassInstance(class_obj, data, self._data_store)
         self.register_object(class_inst, state_obj_id)
         if references:
             self._state.reference_parents.append(class_inst)
@@ -586,8 +639,7 @@ class BinaryFormatter(base.Formatter):
 
                 data.append(value)
 
-        object_id = self._data_store.get_object_id()
-        array = objects.ObjectArray(object_id, data)
+        array = objects.ObjectArray(data, self._data_store)
         self.register_object(array, state_object_id)
         if has_references:
             self._state.reference_parents.append(self)
@@ -653,8 +705,7 @@ class BinaryFormatter(base.Formatter):
             for _ in range(length):
                 values.append(type_class(fp.read(value_size)))
 
-        object_id = self._data_store.get_object_id()
-        array = objects.PrimitiveArray(object_id, type_class, values)
+        array = objects.PrimitiveArray(type_class, values, self._data_store)
         self.register_object(array, state_object_id)
         return array
 
@@ -769,8 +820,7 @@ class BinaryFormatter(base.Formatter):
         """
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
         str_value = self.read_string_raw(fp)
-        object_id = self._data_store.get_object_id()
-        value = objects.StringInstance(object_id, str_value)
+        value = objects.StringInstance(str_value, self._data_store)
         self._state.objects[state_object_id] = value
         return value
 
@@ -804,11 +854,21 @@ class BinaryFormatter(base.Formatter):
                 data.extend(self.read_null_multiple(fp))
             elif record_type == enums.RecordType.ObjectNullMultiple256:
                 data.extend(self.read_null_multiple_256(fp))
+            elif record_type == enums.RecordType.MemberReference:
+                ref = self.read_reference(fp)
+                # The string array only uses a reference if the string has
+                # previously been written/read
+                # This means we can and should look it up immediately
+                str_inst = ref.resolve()
+                value_type = type(str_inst)
+                if (value_type is not str and value_type is not primitives.String
+                        and value_type is not objects.StringInstance):
+                    raise TypeError("String Array contains reference to invalid type")
+                data.append(str(str_inst))
             else:
                 raise ValueError("Expected string or Null, got {}".format(record_type.name))
 
-        object_id = self._data_store.get_object_id()
-        array = objects.StringArray(object_id, data)
+        array = objects.StringArray(data, self._data_store)
         self.register_object(array, state_object_id)
         return array
 
@@ -906,4 +966,202 @@ class BinaryFormatter(base.Formatter):
         self._state.reference_parents.clear()
 
     def write(self, fp: 'BinaryIO', value: 'Instance') -> None:
+        self.write_header(fp, 1, 1, 1, 0)
+        self.write_instance(fp, value)
+        while len(self._write_state.object_cache) > 0:
+            obj = self._write_state.object_cache.pop(0)
+            self.write_instance(fp, obj)
+        fp.write(b'\x0B')
+
+    def write_binary_string_record(self, fp: 'BinaryIO', value: 'Union[str, String, StringInstance]'):
+        fp.write(b'\x06')
+        object_id = self._write_state.get_object_id(str(value))
+        fp.write(object_id.to_bytes(4, 'little', signed=True))
+        self.write_string(fp, str(value))
+
+    @staticmethod
+    def write_bool(fp: 'BinaryIO', value: 'Union[bool, Boolean]') -> None:
+        fp.write(b'\x01' if bool(value) else b'\x00')
+
+    @staticmethod
+    def write_byte(fp: 'BinaryIO', value: 'Union[int, Byte]') -> None:
+        fp.write(int(value).to_bytes(1, 'little', signed=False))
+
+    @staticmethod
+    def write_char(fp: 'BinaryIO', value: 'Union[str, Char]') -> None:
+        fp.write(str(value)[0].encode('utf-8'))
+
+    def write_class_instance(self, fp: 'BinaryIO', value: 'ClassInstance') -> None:
+        # TODO: Implement the write_class_instance() method
         pass
+
+    def write_class(self, fp: 'BinaryIO', value: 'ClassObject') -> None:
+        # TODO: Implement the write_class() method
+        pass
+
+    @staticmethod
+    def write_date_time(fp: 'BinaryIO', value: 'DateTime') -> None:
+        fp.write(int(value).to_bytes(8, 'little', signed=True))
+
+    @staticmethod
+    def write_decimal(fp: 'BinaryIO', value: 'Union[float, int, Decimal]') -> None:
+        decimal = utils.move(value, primitives.Decimal)
+        fp.write(str(decimal).encode('utf-8'))
+
+    @staticmethod
+    def write_double(fp: 'BinaryIO', value: 'Union[float, Double]') -> None:
+        fp.write(struct.pack('<d', float(value)))
+
+    @staticmethod
+    def write_header(fp: 'BinaryIO', root_id: int, header_id: int, major_version: int=1, minor_version: int=1) -> None:
+        fp.write(b'\x00')
+        fp.write(root_id.to_bytes(4, 'little', signed=True))
+        fp.write(header_id.to_bytes(4, 'little', signed=True))
+        fp.write(major_version.to_bytes(4, 'little', signed=True))
+        fp.write(minor_version.to_bytes(4, 'little', signed=True))
+
+    def write_instance(self, fp: 'BinaryIO', value: 'Instance') -> None:
+        value_type = type(value)
+        if issubclass(value_type, objects.ClassInstance):
+            value: objects.ClassInstance
+            self.write_class_instance(fp, value)
+        elif issubclass(value_type, objects.ObjectArray):
+            value: objects.ObjectArray
+            self.write_object_array(fp, value)
+        elif issubclass(value_type, objects.StringArray):
+            value: objects.StringArray
+            self.write_string_array(fp, value)
+        elif issubclass(value_type, objects.PrimitiveArray):
+            value: objects.PrimitiveArray
+            self.write_primitive_array(fp, value)
+        else:
+            raise TypeError("Unknown Instance type: {}".format(value_type.__name__))
+
+    @staticmethod
+    def write_int8(fp: 'BinaryIO', value: 'Union[int, Int8]') -> None:
+        fp.write(int(value).to_bytes(1, 'little', signed=True))
+
+    @staticmethod
+    def write_int16(fp: 'BinaryIO', value: 'Union[int, Int16]') -> None:
+        fp.write(int(value).to_bytes(2, 'little', signed=True))
+
+    @staticmethod
+    def write_int32(fp: 'BinaryIO', value: 'Union[int, Int32]') -> None:
+        fp.write(int(value).to_bytes(4, 'little', signed=True))
+
+    @staticmethod
+    def write_int64(fp: 'BinaryIO', value: 'Union[int, Int64]') -> None:
+        fp.write(int(value).to_bytes(8, 'little', signed=True))
+
+    @staticmethod
+    def write_library(fp: 'BinaryIO', value: 'Library') -> None:
+        pass
+
+    @staticmethod
+    def write_null(fp: 'BinaryIO') -> None:
+        pass
+
+    @staticmethod
+    def write_null_record(fp: 'BinaryIO', count: int=1) -> None:
+        if count <= 0:
+            raise ValueError("Null count must be greater than 0")
+
+        if count == 1:
+            fp.write(b'\x0A')
+        elif count < 256:
+            fp.write(b'\x0D')
+            fp.write(count.to_bytes(1, 'little', signed=False))
+        else:
+            fp.write(b'\x0E')
+            fp.write(count.to_bytes(4, 'little', signed=False))
+
+    def write_primitive(self, fp: 'BinaryIO', value: 'Primitive') -> None:
+        write_fn = self._write_primitive_lookup[value.type]
+        if write_fn is None:
+            raise ValueError("Write function for {} not implemented".format(value.type.name))
+        write_fn(fp, value)
+
+    def write_object_array(self, fp: 'BinaryIO', value: 'ObjectArray') -> None:
+        is_value_type = value.is_value_type_array()
+
+        # Write any libraries that we need before the binary array record
+        # This is only necessary for value type arrays, as non-value type
+        # arrays do not define their members inline
+        if is_value_type:
+            for lib in value.get_libraries():
+                self.write_library(fp, lib)
+
+        fp.write(b'\x10')
+        object_id = self._write_state.get_object_id(value)
+        fp.write(object_id.to_bytes(4, 'little', signed=True))
+        fp.write(len(value).to_bytes(4, 'little', signed=True))
+
+        # If we don't have any values, exit now
+        if len(value) == 0:
+            return
+
+        if is_value_type:
+            for item in value.data:
+                self.write_class_instance(fp, item)
+        else:
+            null_count = 0
+            for item in value.data:
+                if item is None:
+                    null_count += 1
+                else:
+                    # Flush any nulls
+                    if null_count > 0:
+                        self.write_null_record(fp, null_count)
+                        null_count = 0
+
+                    self.write_reference(fp, item)
+
+    def write_primitive_array(self, fp: 'BinaryIO', value: 'PrimitiveArray') -> None:
+        fp.write(b'\x0F')
+        object_id = self._write_state.get_object_id(value)
+        fp.write(object_id.to_bytes(4, 'little', signed=True))
+        fp.write(len(value).to_bytes(4, 'little', signed=True))
+        # TODO: Find a way to get the enum without creating a new instance of the primitive
+        primitive_type = value.primitive_class().type  # type: PrimitiveType
+        fp.write(primitive_type.to_bytes(1, 'little', signed=False))
+
+        write_fn = self._write_primitive_lookup[primitive_type]
+        if write_fn is None:
+            raise ValueError("Write function for {} not implemented".format(primitive_type.name))
+        for value in value.data:
+            write_fn(fp, value)
+
+    def write_reference(self, fp: 'BinaryIO', item: 'Union[Instance, str]') -> None:
+        object_id = self._write_state.get_object_id(item)
+        fp.write(b'\x09')
+        fp.write(object_id.to_bytes(4, 'little', signed=True))
+
+    @staticmethod
+    def write_single(fp: 'BinaryIO', value: 'Union[float, Single]') -> None:
+        fp.write(struct.pack('<f', float(value)))
+
+    @staticmethod
+    def write_string(fp: 'BinaryIO', value: 'Union[str, String]') -> None:
+        byte_str = str(value).encode('utf-8')
+        fp.write(utils.encode_multi_byte_int(len(byte_str)))
+        fp.write(byte_str)
+
+    def write_string_array(self, fp: 'BinaryIO', value: 'StringArray') -> None:
+        # TODO: Implement the write_string_array() method
+        pass
+
+    @staticmethod
+    def write_time_span(fp: 'BinaryIO', value: 'TimeSpan') -> None:
+        fp.write(value.value.to_bytes(8, 'little', signed=False))
+
+    @staticmethod
+    def write_uint16(fp: 'BinaryIO', value: 'Union[int, UInt16]') -> None:
+        fp.write(int(value).to_bytes(2, 'little', signed=False))
+
+    @staticmethod
+    def write_uint32(fp: 'BinaryIO', value: 'Union[int, UInt32]') -> None:
+        fp.write(int(value).to_bytes(4, 'little', signed=False))
+
+    @staticmethod
+    def write_uint64(fp: 'BinaryIO', value: 'Union[int, UInt64]') -> None:
+        fp.write(int(value).to_bytes(8, 'little', signed=False))

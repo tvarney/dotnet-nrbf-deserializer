@@ -3,13 +3,14 @@ from abc import ABCMeta, abstractmethod
 
 import dotnet.enum as enums
 import dotnet.exceptions as exceptions
+import dotnet.primitives as primitives
 import dotnet.structures as structs
 import dotnet.utils as utils
 import dotnet.value
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+    from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
     from dotnet.enum import BinaryType, BinaryArrayType
     from dotnet.primitives import Primitive, PrimitiveValue
     from dotnet.structures import ExtraInfoType
@@ -57,19 +58,12 @@ class DataStore(object):
 
 
 class Instance(dotnet.value.Value, metaclass=ABCMeta):
-    def __init__(self, object_id: int) -> None:
-        self._object_id = object_id
+    def __init__(self, data_store: 'Optional[DataStore]'=None) -> None:
+        self._data_store = data_store if data_store is not None else DataStore.get_global()
 
     @property
-    def object_id(self) -> int:
-        return self._object_id
-
-    @object_id.setter
-    def object_id(self, new_object_id: int) -> None:
-        # TODO: Implement changing the object id within the data store
-        if new_object_id == 0:
-            raise ValueError("Can not set Instance object id to 0")
-        self._object_id = new_object_id
+    def data_store(self) -> 'DataStore':
+        return self._data_store
 
     @abstractmethod
     def resolve_references(self, object_map: 'Dict[int, Instance]', strict: bool=True) -> None:
@@ -90,18 +84,18 @@ class Instance(dotnet.value.Value, metaclass=ABCMeta):
         raise exceptions.MethodNotImplemented(self, "__setitem__()")
 
     def __eq__(self, other: 'Any') -> bool:
-        if issubclass(type(other), Instance):
-            other: 'Instance'
-            return self._object_id == other._object_id
-        return False
+        return id(self) == id(other)
 
     def __ne__(self, other: 'Any') -> bool:
         return not self.__eq__(other)
 
+    def __hash__(self) -> int:
+        return id(self)
+
 
 class ArrayInstance(Instance, metaclass=ABCMeta):
-    def __init__(self, object_id: int, data: 'List[Any]') -> None:
-        Instance.__init__(self, object_id)
+    def __init__(self, data: 'List[Any]', data_store: 'Optional[DataStore]'=None) -> None:
+        Instance.__init__(self, data_store)
         self._data = data
 
     @property
@@ -124,7 +118,7 @@ class ArrayInstance(Instance, metaclass=ABCMeta):
         return "[{}]".format(", ".join(str(value) for value in self._data))
 
     def __repr__(self) -> str:
-        return "{}({}, {})".format(type(self).__name__, self._object_id, self._data)
+        return "{}({})".format(type(self).__name__, self._data)
 
     def __len__(self) -> int:
         return len(self._data)
@@ -167,11 +161,11 @@ class InstanceReference(dotnet.value.Value):
 
 
 class BinaryArray(ArrayInstance):
-    def __init__(self, object_id: int, rank: int, array_type: 'BinaryArrayType', lengths: 'List[int]',
-                 offsets: 'Optional[List[int]]', bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType',
-                 data: 'Optional[List[Optional[Value]]]') -> None:
+    def __init__(self, rank: int, array_type: 'BinaryArrayType', lengths: 'List[int]', offsets: 'Optional[List[int]]',
+                 bin_type: 'BinaryType', extra_type_info: 'ExtraInfoType', data: 'Optional[List[Optional[Value]]]',
+                 data_store: 'Optional[DataStore]'=None) -> None:
         data_array = data if data is not None else list()
-        ArrayInstance.__init__(self, object_id, data_array)
+        ArrayInstance.__init__(self, data_array, data_store)
         self._rank = rank
         self._array_type = array_type
         self._lengths = lengths
@@ -213,15 +207,49 @@ class BinaryArray(ArrayInstance):
         self._data[key] = value
 
     def __repr__(self) -> str:
-        return "BinaryArray({}, {}, {}, {}, {}, {}, {}, {})".format(
-            self._object_id, self._rank, self._array_type, self._lengths, self._offsets, self._bin_type,
+        return "BinaryArray({}, {}, {}, {}, {}, {}, {})".format(
+            self._rank, self._array_type, self._lengths, self._offsets, self._bin_type,
             self._extra_info, self._data
         )
 
 
 class ObjectArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[Union[Instance, InstanceReference, None]]') -> None:
-        ArrayInstance.__init__(self, object_id, data)
+    def __init__(self, data: 'List[Union[Instance, InstanceReference, None]]',
+                 data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, data, data_store)
+
+    def get_libraries(self) -> 'Set[Library]':
+        libs = set()
+        for item in self._data:
+            if issubclass(type(item), ClassInstance):
+                class_obj = item.class_object  # type: ClassObject
+                libs.add(class_obj.library)
+
+        return libs
+
+    def is_value_type_array(self) -> bool:
+        if len(self._data) == 0:
+            return True
+
+        first_item = self._data[0]
+        if first_item is None:
+            return False
+
+        # Check for ClassInstance
+        if issubclass(first_item, ClassInstance):
+            data_class = first_item.class_object  # type: ClassObject
+            if not data_class.value_type:
+                return False
+
+            for item in self._data:
+                if issubclass(item, ClassInstance):
+                    if item.class_object != data_class:
+                        return False
+                else:
+                    return False
+            return True
+
+        return False
 
     def __getitem__(self, index: int) -> 'Any':
         return self._data[index]
@@ -231,8 +259,8 @@ class ObjectArray(ArrayInstance):
 
 
 class StringArray(ArrayInstance):
-    def __init__(self, object_id: int, data: 'List[Optional[str]]') -> None:
-        ArrayInstance.__init__(self, object_id, data)
+    def __init__(self, data: 'List[Optional[str]]', data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, data, data_store)
 
     def __getitem__(self, index: int) -> 'Optional[str]':
         return self._data[index]
@@ -246,8 +274,8 @@ class StringArray(ArrayInstance):
 
 
 class PrimitiveArray(ArrayInstance):
-    def __init__(self, object_id: int, primitive_class: type, data: 'List[Primitive]') -> None:
-        ArrayInstance.__init__(self, object_id, data)
+    def __init__(self, primitive_class: type, data: 'List[Primitive]', data_store: 'Optional[DataStore]'=None) -> None:
+        ArrayInstance.__init__(self, data, data_store)
         self._data_class = primitive_class
 
     @property
@@ -268,12 +296,13 @@ class PrimitiveArray(ArrayInstance):
             yield value
 
     def __repr__(self) -> str:
-        return "PrimitiveArray({}, {}, {})".format(self._object_id, self._data_class, self._data)
+        return "PrimitiveArray({}, {})".format(self._data_class, self._data)
 
 
 class ClassInstance(Instance):
-    def __init__(self, object_id: int, class_object: 'ClassObject', member_data: 'List[Value]') -> None:
-        Instance.__init__(self, object_id)
+    def __init__(self, class_object: 'ClassObject', member_data: 'List[Value]',
+                 data_store: 'Optional[DataStore]'=None) -> None:
+        Instance.__init__(self, data_store)
         self._class_object = class_object
         self._member_data = member_data
 
@@ -306,15 +335,15 @@ class ClassInstance(Instance):
         self._member_data[key] = value
 
     def __repr__(self) -> str:
-        return "ClassInstance({}, {}, {})".format(self._object_id, repr(self._class_object), repr(self._member_data))
+        return "ClassInstance({}, {})".format(repr(self._class_object), repr(self._member_data))
 
     def __str__(self) -> str:
-        return "<{} Instance: {}>".format(self._class_object.name, self.object_id)
+        return "<{} Instance: {}>".format(self._class_object.name, id(self))
 
 
 class StringInstance(Instance):
-    def __init__(self, object_id: int, str_data: str):
-        Instance.__init__(self, object_id)
+    def __init__(self, str_data: str, data_store: 'Optional[DataStore]'=None) -> None:
+        Instance.__init__(self, data_store)
         self._data = str_data
 
     @property
@@ -332,7 +361,13 @@ class StringInstance(Instance):
         return self._data
 
     def __repr__(self) -> str:
-        return "StringInstance({}, {})".format(self._object_id, self._data)
+        return "StringInstance({})".format(self._data)
+
+    def __eq__(self, other: 'Any') -> bool:
+        value_type = type(other)
+        if value_type is str or value_type is primitives.String or value_type is StringInstance:
+            return str(other) == self._data
+        return False
 
     def __getitem__(self, key: 'Any') -> str:
         if key == 0 or key == 'data':
@@ -344,6 +379,9 @@ class StringInstance(Instance):
             self._data = str(value)
         else:
             raise KeyError("Invalid key {} on String Instance".format(key))
+
+    def __hash__(self) -> int:
+        return hash(self._data)
 
 
 class Library(object):
