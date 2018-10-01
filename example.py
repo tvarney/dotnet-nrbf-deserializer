@@ -30,6 +30,8 @@ def inspect_instance(instance: 'Instance') -> None:
     elif instance_type is PrimitiveArray:
         instance: PrimitiveArray
         inspect_primitive_array(instance)
+    else:
+        print(repr(instance))
 
 
 def inspect_primitive_array(inst: 'PrimitiveArray') -> None:
