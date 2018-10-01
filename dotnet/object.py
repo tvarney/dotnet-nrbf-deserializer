@@ -126,6 +126,9 @@ class ArrayInstance(Instance, metaclass=ABCMeta):
     def __repr__(self) -> str:
         return "{}({}, {})".format(type(self).__name__, self._object_id, self._data)
 
+    def __len__(self) -> int:
+        return len(self._data)
+
 
 class InstanceReference(dotnet.value.Value):
     def __init__(self, object_id: int, object_map: 'Optional[Dict[int, Instance]]'=None) -> None:
