@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
     from dotnet.object import Instance
 
 
-class Formatter(ABC):
+class Reader(ABC):
     @classmethod
     @abstractmethod
     def binary(cls) -> bool:
@@ -23,6 +23,13 @@ class Formatter(ABC):
     def read_file(self, filename: str) -> 'Instance':
         with open(filename, 'rb' if type(self).binary() else 'r') as fp:
             return self.read(fp)
+
+
+class Writer(ABC):
+    @classmethod
+    @abstractmethod
+    def binary(cls) -> bool:
+        raise exceptions.ClassMethodNotImplemented(cls, "binary()")
 
     @abstractmethod
     def write(self, fp: 'IO', value: 'Instance') -> None:

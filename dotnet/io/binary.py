@@ -20,70 +20,19 @@ if typing.TYPE_CHECKING:
     from dotnet.structures import ClassInfo, MemberTypeInfo
 
 
-class BinaryFormatter(base.Formatter):
-    class ReadState(object):
-        def __init__(self) -> None:
-            self.root_id = 0
-            self.header_id = 0
-            self.major_version = 0
-            self.minor_version = 0
-            self.objects = dict()  # type: Dict[int, Instance]
-            self.libraries = dict()  # type: Dict[int, Library]
-            self.library_id_map = dict()  # type: Dict[int, int]
-            self.reference_parents = list()
-
-        def reset(self) -> None:
-            self.root_id = 0
-            self.header_id = 0
-            self.major_version = 0
-            self.minor_version = 0
-            self.objects.clear()
-            self.libraries.clear()
-            self.library_id_map.clear()
-            self.reference_parents.clear()
-
-    class WriteState(object):
-        def __init__(self) -> None:
-            self.object_map = dict()  # type: Dict[int, int]
-            self.class_set = set()    # type: Set[ClassObject]
-            self.library_map = dict()  # type: Dict[Library, int]
-            self.object_cache = list()  # type: List[Instance]
-            self._next_obj_id = 1
-            self._next_inline_obj_id = -1
-
-        def get_object_id(self, item: 'Any', do_not_cache: bool=False, inline_definition: bool=False) -> int:
-            item_id = id(item)
-            object_id = self.object_map.get(item_id, 0)
-            if object_id != 0:
-                return object_id
-
-            if inline_definition:
-                object_id = self._next_inline_obj_id
-                self._next_inline_obj_id += 1
-                # TODO: Check for 32-bit signed overflow
-            else:
-                self.object_cache.append(item)
-                object_id = self._next_obj_id
-                self._next_obj_id += 1
-
-            if not do_not_cache:
-                self.object_map[item_id] = object_id
-
-            return object_id
-
+class BinaryReader(base.Reader):
     @classmethod
     def binary(cls) -> bool:
         return True
 
     def __init__(self, data_store: 'Optional[DataStore]'=None, **kwargs) -> None:
-        if data_store is None:
-            ds = objects.DataStore()
-        else:
-            ds = data_store
-        self._data_store = ds
-        self._state = BinaryFormatter.ReadState()
-        self._write_state = BinaryFormatter.WriteState()
-        self._strict = not bool(kwargs.pop("permissive", False))
+        self._data_store = data_store if data_store is not None else objects.DataStore.get_global()
+        self._root_id = 0
+        self._objects = dict()  # type: Dict[int, Instance]
+        self._libraries = dict()  # type: Dict[int, Library]
+        self._library_id_map = dict()  # type: Dict[int, int]
+        self._reference_parents = list()  # type: List[Instance]
+        self._strict = not bool(kwargs.pop('permissive', False))
         self._read_record_fn = [
             self.read_header,
             self.read_class_with_id,
@@ -109,27 +58,13 @@ class BinaryFormatter(base.Formatter):
             None,
             None
         ]
-        self._write_primitive_lookup = [
-            None,  # TODO: Add an error function for gaps
-            self.write_bool,
-            self.write_byte,
-            self.write_char,
-            None,
-            self.write_decimal,
-            self.write_double,
-            self.write_int16,
-            self.write_int32,
-            self.write_int64,
-            self.write_int8,
-            self.write_single,
-            self.write_time_span,
-            self.write_date_time,
-            self.write_uint16,
-            self.write_uint32,
-            self.write_uint64,
-            self.write_null,
-            self.write_string
-        ]
+
+    def reset(self) -> None:
+        self._root_id = 0
+        self._objects.clear()
+        self._libraries.clear()
+        self._library_id_map.clear()
+        self._reference_parents.clear()
 
     def build_class(self, class_info: 'ClassInfo', library: 'Library',
                     member_info: 'Optional[MemberTypeInfo]') -> 'ClassObject':
@@ -181,14 +116,14 @@ class BinaryFormatter(base.Formatter):
         :param fp: The binary stream to read records from
         :return: The root object from the stream
         """
-        self._state.reset()
+        self.reset()
         self.read_header(fp, True)
         while self.read_record(fp):
             pass
 
         self.resolve_references()
-        root_value = self._state.objects[self._state.root_id]
-        self._state.reset()
+        root_value = self._objects[self._root_id]
+        self.reset()
         return root_value
 
     def read_binary_array(self, fp: 'BinaryIO') -> 'objects.BinaryArray':
@@ -257,7 +192,7 @@ class BinaryFormatter(base.Formatter):
                                     self._data_store)
         self.register_object(array, state_object_id)
         if references:
-            self._state.reference_parents.append(array)
+            self._reference_parents.append(array)
         return array
 
     @staticmethod
@@ -334,7 +269,7 @@ class BinaryFormatter(base.Formatter):
         class_inst = objects.ClassInstance(class_obj, data, self._data_store)
         self.register_object(class_inst, state_obj_id)
         if references:
-            self._state.reference_parents.append(class_inst)
+            self._reference_parents.append(class_inst)
         return class_inst
 
     def read_class_type_info(self, fp: 'BinaryIO') -> 'structs.ClassTypeInfo':
@@ -369,7 +304,7 @@ class BinaryFormatter(base.Formatter):
         """
         object_id = int.from_bytes(fp.read(4), 'little', signed=True)
         metadata_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        metadata_obj = self._state.objects[metadata_id]
+        metadata_obj = self._objects[metadata_id]
         if type(metadata_obj) is objects.ClassInstance:
             class_inst = metadata_obj  # type: ClassInstance
             class_obj = class_inst.class_object
@@ -392,7 +327,7 @@ class BinaryFormatter(base.Formatter):
         class_info = self.read_class_info(fp)
         member_type_info = self.read_member_type_info(fp, class_info.members)
         state_library_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        library = self._state.libraries[state_library_id]
+        library = self._libraries[state_library_id]
         class_obj = self.build_class(class_info, library, member_type_info)
         return self.read_class_instance(fp, class_info.object_id, class_obj)
 
@@ -415,7 +350,7 @@ class BinaryFormatter(base.Formatter):
         """
         class_info = self.read_class_info(fp)
         library_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        library = self._state.libraries[library_id]
+        library = self._libraries[library_id]
         class_obj = self.build_class(class_info, library, None)
         return self.read_class_instance(fp, class_info.object_id, class_obj)
 
@@ -506,10 +441,7 @@ class BinaryFormatter(base.Formatter):
             if major != 1 or minor != 0:
                 raise IOError("Invalid SerializedStreamHeader version {}.{}; must be 1.0".format(major, minor))
 
-        self._state.minor_version = minor
-        self._state.major_version = major
-        self._state.root_id = root_id
-        self._state.header_id = header_id
+        self._root_id = root_id
         return root_id, header_id, major, minor
 
     def read_library(self, fp: 'BinaryIO') -> 'Library':
@@ -531,8 +463,8 @@ class BinaryFormatter(base.Formatter):
         # TODO: check if we have a library which matches this one already
         library = objects.Library.parse_string(str_value)
         library.id = self._data_store.get_library_id()
-        self._state.library_id_map[state_lib_id] = library.id
-        self._state.libraries[state_lib_id] = library
+        self._library_id_map[state_lib_id] = library.id
+        self._libraries[state_lib_id] = library
         return library
 
     def read_member_type_info(self, fp: 'BinaryIO', member_list: 'List[str]') -> 'structs.MemberTypeInfo':
@@ -642,7 +574,7 @@ class BinaryFormatter(base.Formatter):
         array = objects.ObjectArray(data, self._data_store)
         self.register_object(array, state_object_id)
         if has_references:
-            self._state.reference_parents.append(self)
+            self._reference_parents.append(array)
         return array
 
     def read_primitive(self, fp: 'BinaryIO') -> 'Primitive':
@@ -806,7 +738,7 @@ class BinaryFormatter(base.Formatter):
         :return: An InstanceReference
         """
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        reference = objects.InstanceReference(state_object_id, self._state.objects)
+        reference = objects.InstanceReference(state_object_id, self._objects)
         return reference
 
     def read_string(self, fp: 'BinaryIO') -> 'objects.StringInstance':
@@ -821,7 +753,7 @@ class BinaryFormatter(base.Formatter):
         state_object_id = int.from_bytes(fp.read(4), 'little', signed=True)
         str_value = self.read_string_raw(fp)
         value = objects.StringInstance(str_value, self._data_store)
-        self._state.objects[state_object_id] = value
+        self._objects[state_object_id] = value
         return value
 
     def read_string_array(self, fp: 'BinaryIO') -> 'StringArray':
@@ -946,9 +878,9 @@ class BinaryFormatter(base.Formatter):
         :param inst: The object to register
         :param state_object_id: The stream state object id of the object
         """
-        if state_object_id in self._state.objects.keys():
+        if state_object_id in self._objects.keys():
             raise ValueError("Object with ID {} already read from stream".format(state_object_id))
-        self._state.objects[state_object_id] = inst
+        self._objects[state_object_id] = inst
 
     def resolve_references(self) -> None:
         """Resolve all unresolved references
@@ -960,22 +892,80 @@ class BinaryFormatter(base.Formatter):
         This method is called automatically by the
         BinaryFormatter.read() method.
         """
-        for ref_parent in self._state.reference_parents:
-            ref_parent.resolve_references(self._state.objects)
+        for ref_parent in self._reference_parents:
+            ref_parent.resolve_references(self._objects)
 
-        self._state.reference_parents.clear()
+        self._reference_parents.clear()
+
+
+class BinaryWriter(base.Writer):
+    @classmethod
+    def binary(cls) -> bool:
+        return True
+
+    def __init__(self, data_store: 'Optional[DataStore]'=None, **kwargs) -> None:
+        self._data_store = data_store if data_store is not None else objects.DataStore.get_global()
+        self._strict = not bool(kwargs.pop("permissive", False))
+        self._object_map = dict()  # type: Dict[int, int]
+        self._class_set = set()  # type: Set[ClassObject]
+        self._library_map = dict()  # type: Dict[Library, int]
+        self._object_cache = list()  # type: List[Instance]
+        self._next_obj_id = 1
+        self._next_inline_obj_id = -1
+
+        self._write_primitive_lookup = [
+            None,  # TODO: Add an error function for gaps
+            self.write_bool,
+            self.write_byte,
+            self.write_char,
+            None,
+            self.write_decimal,
+            self.write_double,
+            self.write_int16,
+            self.write_int32,
+            self.write_int64,
+            self.write_int8,
+            self.write_single,
+            self.write_time_span,
+            self.write_date_time,
+            self.write_uint16,
+            self.write_uint32,
+            self.write_uint64,
+            self.write_null,
+            self.write_string
+        ]
+
+    def get_object_id(self, item: 'Any', do_not_cache: bool=False, inline_definition: bool=False) -> int:
+        item_id = id(item)
+        object_id = self._object_map.get(item_id, 0)
+        if object_id != 0:
+            return object_id
+
+        if inline_definition:
+            object_id = self._next_inline_obj_id
+            self._next_inline_obj_id += 1
+            # TODO: Check for 32-bit signed overflow
+        else:
+            self._object_cache.append(item)
+            object_id = self._next_obj_id
+            self._next_obj_id += 1
+
+        if not do_not_cache:
+            self._object_map[item_id] = object_id
+
+        return object_id
 
     def write(self, fp: 'BinaryIO', value: 'Instance') -> None:
         self.write_header(fp, 1, 1, 1, 0)
         self.write_instance(fp, value)
-        while len(self._write_state.object_cache) > 0:
-            obj = self._write_state.object_cache.pop(0)
+        while len(self._object_cache) > 0:
+            obj = self._object_cache.pop(0)
             self.write_instance(fp, obj)
         fp.write(b'\x0B')
 
     def write_binary_string_record(self, fp: 'BinaryIO', value: 'Union[str, String, StringInstance]'):
         fp.write(b'\x06')
-        object_id = self._write_state.get_object_id(str(value))
+        object_id = self.get_object_id(str(value))
         fp.write(object_id.to_bytes(4, 'little', signed=True))
         self.write_string(fp, str(value))
 
@@ -1092,7 +1082,7 @@ class BinaryFormatter(base.Formatter):
                 self.write_library(fp, lib)
 
         fp.write(b'\x10')
-        object_id = self._write_state.get_object_id(value)
+        object_id = self.get_object_id(value)
         fp.write(object_id.to_bytes(4, 'little', signed=True))
         fp.write(len(value).to_bytes(4, 'little', signed=True))
 
@@ -1118,7 +1108,7 @@ class BinaryFormatter(base.Formatter):
 
     def write_primitive_array(self, fp: 'BinaryIO', value: 'PrimitiveArray') -> None:
         fp.write(b'\x0F')
-        object_id = self._write_state.get_object_id(value)
+        object_id = self.get_object_id(value)
         fp.write(object_id.to_bytes(4, 'little', signed=True))
         fp.write(len(value).to_bytes(4, 'little', signed=True))
         # TODO: Find a way to get the enum without creating a new instance of the primitive
@@ -1132,7 +1122,7 @@ class BinaryFormatter(base.Formatter):
             write_fn(fp, value)
 
     def write_reference(self, fp: 'BinaryIO', item: 'Union[Instance, str]') -> None:
-        object_id = self._write_state.get_object_id(item)
+        object_id = self.get_object_id(item)
         fp.write(b'\x09')
         fp.write(object_id.to_bytes(4, 'little', signed=True))
 

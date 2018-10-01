@@ -2,13 +2,13 @@
 import io
 import unittest
 
-from dotnet.io.binary import BinaryFormatter
+from dotnet.io.binary import BinaryReader
 from dotnet.primitives import *
 
 
 class TestBinaryFormatter(unittest.TestCase):
     def test_read(self):
-        bf = BinaryFormatter()
+        bf = BinaryReader()
 
         valid_header = b'\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00'
         bin_string_record = b'\06\x01\x00\x00\x00\x0BHello World'
@@ -39,14 +39,14 @@ class TestBinaryFormatter(unittest.TestCase):
         self.assertRaises(IOError, bf.read, io.BytesIO(bad_minor_version))
 
     def test_read_char(self):
-        bf = BinaryFormatter()
+        bf = BinaryReader()
 
         self.assertEqual(bf.read_char(io.BytesIO(b'!\xF6')), Char("!"))
         self.assertEqual(bf.read_char(io.BytesIO(chr(0xff5f).encode('utf-8') + b'\xF6')), Char(chr(0xff5f)))
         self.assertRaises(UnicodeDecodeError, bf.read_char, io.BytesIO(b'\xF0'))
 
     def test_read_string_raw(self):
-        bf = BinaryFormatter()
+        bf = BinaryReader()
 
         self.assertEqual(bf.read_string_raw(io.BytesIO(b'\x05hello\x00\x00')), "hello")
         self.assertEqual(bf.read_string_raw(io.BytesIO(b'\xC8\x01' + b'a' * 200 + b'\x00')), 'a' * 200)

@@ -5,7 +5,7 @@ import sys
 
 import dotnet.object as objects
 from dotnet.object import PrimitiveArray, ClassInstance
-from dotnet.io.binary import BinaryFormatter
+from dotnet.io.binary import BinaryReader
 
 import typing
 if typing.TYPE_CHECKING:
@@ -60,8 +60,8 @@ def main():
         sys.exit(1)
 
     ds = objects.DataStore.get_global()
-    formatter = BinaryFormatter(ds)
-    value = formatter.read_file(args.file)
+    reader = BinaryReader(ds)
+    value = reader.read_file(args.file)
     inspect_classes(ds.classes)
     inspect_instance(value)
 
