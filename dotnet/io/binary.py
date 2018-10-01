@@ -907,6 +907,7 @@ class BinaryWriter(base.Writer):
         self._data_store = data_store if data_store is not None else objects.DataStore.get_global()
         self._strict = not bool(kwargs.pop("permissive", False))
         self._object_map = dict()  # type: Dict[int, int]
+        self._string_pool = dict()  # type: Dict[str, int]
         self._class_set = set()  # type: Set[ClassObject]
         self._library_map = dict()  # type: Dict[Library, int]
         self._object_cache = list()  # type: List[Instance]
@@ -964,10 +965,17 @@ class BinaryWriter(base.Writer):
         fp.write(b'\x0B')
 
     def write_binary_string_record(self, fp: 'BinaryIO', value: 'Union[str, String, StringInstance]'):
-        fp.write(b'\x06')
-        object_id = self.get_object_id(str(value))
-        fp.write(object_id.to_bytes(4, 'little', signed=True))
-        self.write_string(fp, str(value))
+        # String pooling; check if we have already written the given string
+        str_val = str(value)
+        object_id = self._string_pool.get(str_val, 0)
+        if object_id == 0:
+            object_id = self.get_object_id(StringInstance(str_val))
+            fp.write(b'\x06')
+            fp.write(object_id.to_bytes(4, 'little', signed=True))
+            self.write_string(fp, str(value))
+        else:
+            fp.write(b'\x09')
+            fp.write(object_id.to_bytes(4, 'little', signed=True))
 
     @staticmethod
     def write_bool(fp: 'BinaryIO', value: 'Union[bool, Boolean]') -> None:
