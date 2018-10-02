@@ -6,6 +6,7 @@ import typing
 if typing.TYPE_CHECKING:
     from typing import List, Union
     from dotnet.enum import BinaryType, PrimitiveType
+    from dotnet.object import Library
 
     ExtraInfoType = Union[PrimitiveType, str, 'ClassTypeInfo', None]
 
@@ -45,20 +46,20 @@ class ClassTypeInfo(object):
     it defines a unique class to be used for that member.
     """
 
-    def __init__(self, class_name: str, library_id: int) -> None:
+    def __init__(self, class_name: str, library: 'Library') -> None:
         self._class_name = class_name
-        self._library_id = library_id
+        self._library = library
 
     @property
     def class_name(self) -> str:
         return self._class_name
 
     @property
-    def library_id(self) -> int:
-        return self._library_id
+    def library(self) -> 'Library':
+        return self._library
 
     def __repr__(self) -> str:
-        return "ClassTypeInfo({}, {})".format(self._class_name, self._library_id)
+        return "ClassTypeInfo({}, {})".format(self._class_name, self._library.spec)
 
     def __str__(self) -> str:
         return self.__repr__()

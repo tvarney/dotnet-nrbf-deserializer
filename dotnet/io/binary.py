@@ -10,7 +10,7 @@ import dotnet.utils as utils
 
 import typing
 if typing.TYPE_CHECKING:
-    from typing import Any, BinaryIO, Dict, List, Optional, Set, Tuple, Type, Union
+    from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Type, Union
 
     from dotnet.enum import PrimitiveType
     from dotnet.object import ClassObject, ClassInstance, DataStore, Instance, InstanceReference, Library,\
@@ -29,8 +29,7 @@ class BinaryReader(base.Reader):
         self._data_store = data_store if data_store is not None else objects.DataStore.get_global()
         self._root_id = 0
         self._objects = dict()  # type: Dict[int, Instance]
-        self._libraries = dict()  # type: Dict[int, Library]
-        self._library_id_map = dict()  # type: Dict[int, int]
+        self._library_map = dict()  # type: Dict[int, Library]
         self._reference_parents = list()  # type: List[Instance]
         self._strict = not bool(kwargs.pop('permissive', False))
         self._read_record_fn = [
@@ -62,8 +61,7 @@ class BinaryReader(base.Reader):
     def reset(self) -> None:
         self._root_id = 0
         self._objects.clear()
-        self._libraries.clear()
-        self._library_id_map.clear()
+        self._library_map.clear()
         self._reference_parents.clear()
 
     def build_class(self, class_info: 'ClassInfo', library: 'Library',
@@ -80,7 +78,7 @@ class BinaryReader(base.Reader):
         """
         if member_info is None:
             partial = True
-            members = self._data_store.metadata.get((library.id, class_info.name), None)
+            members = self._data_store.metadata.get((library, class_info.name), None)
         else:
             partial = False
             member_count = len(class_info.members)
@@ -282,8 +280,12 @@ class BinaryReader(base.Reader):
         :return: A ClassTypeInfo structure
         """
         class_name = self.read_string_raw(fp)
-        library_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        return structs.ClassTypeInfo(class_name, library_id)
+        # Per NRBF 2.1.1.8, the library denoted by this stream id must already have been
+        # read by the Reader
+        # TODO: Make value type arrays and classes with embedded value types respect this when writing
+        stream_library_id = int.from_bytes(fp.read(4), 'little', signed=True)
+        library = self._library_map[stream_library_id]
+        return structs.ClassTypeInfo(class_name, library)
 
     def read_class_with_id(self, fp: 'BinaryIO') -> 'ClassInstance':
         """Read a class instance from the stream using metadata
@@ -327,7 +329,7 @@ class BinaryReader(base.Reader):
         class_info = self.read_class_info(fp)
         member_type_info = self.read_member_type_info(fp, class_info.members)
         state_library_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        library = self._libraries[state_library_id]
+        library = self._library_map[state_library_id]
         class_obj = self.build_class(class_info, library, member_type_info)
         return self.read_class_instance(fp, class_info.object_id, class_obj)
 
@@ -350,7 +352,7 @@ class BinaryReader(base.Reader):
         """
         class_info = self.read_class_info(fp)
         library_id = int.from_bytes(fp.read(4), 'little', signed=True)
-        library = self._libraries[library_id]
+        library = self._library_map[library_id]
         class_obj = self.build_class(class_info, library, None)
         return self.read_class_instance(fp, class_info.object_id, class_obj)
 
@@ -460,11 +462,21 @@ class BinaryReader(base.Reader):
         """
         state_lib_id = int.from_bytes(fp.read(4), 'little', signed=True)
         str_value = self.read_string_raw(fp)
-        # TODO: check if we have a library which matches this one already
-        library = objects.Library.parse_string(str_value)
-        library.id = self._data_store.get_library_id()
-        self._library_id_map[state_lib_id] = library.id
-        self._libraries[state_lib_id] = library
+
+        # Build a library from the given specification string
+        library = objects.Library.parse_specification(str_value)
+
+        # Attempt to get the library managed by the DataStore
+        lib_key = hash(library)
+        old_lib = self._data_store.libraries.get(lib_key, None)
+        if old_lib is None:
+            self._data_store.libraries[lib_key] = library
+        else:
+            # TODO: Move attributes when missing between libraries
+            # TODO: Raise an error on attributes which don't match
+            library = old_lib
+
+        self._library_map[state_lib_id] = library
         return library
 
     def read_member_type_info(self, fp: 'BinaryIO', member_list: 'List[str]') -> 'structs.MemberTypeInfo':
@@ -843,7 +855,7 @@ class BinaryReader(base.Reader):
         """
         class_info = self.read_class_info(fp)
         member_type_info = self.read_member_type_info(fp, class_info.members)
-        library = self._data_store.libraries[-1]
+        library = objects.Library.SystemLibrary
         class_obj = self.build_class(class_info, library, member_type_info)
         return self.read_class_instance(fp, class_info.object_id, class_obj)
 
@@ -908,11 +920,10 @@ class BinaryWriter(base.Writer):
         self._strict = not bool(kwargs.pop("permissive", False))
         self._object_map = dict()  # type: Dict[int, int]
         self._string_pool = dict()  # type: Dict[str, int]
-        self._class_set = set()  # type: Set[ClassObject]
+        self._class_map = dict()  # type: Dict[ClassObject, int]
         self._library_map = dict()  # type: Dict[Library, int]
         self._object_cache = list()  # type: List[Instance]
         self._next_obj_id = 1
-        self._next_inline_obj_id = -1
 
         self._write_primitive_lookup = [
             None,  # TODO: Add an error function for gaps
@@ -937,19 +948,18 @@ class BinaryWriter(base.Writer):
         ]
 
     def get_object_id(self, item: 'Any', do_not_cache: bool=False, inline_definition: bool=False) -> int:
+        # TODO: Give user option for how to generate the object id's.
         item_id = id(item)
         object_id = self._object_map.get(item_id, 0)
         if object_id != 0:
             return object_id
 
+        object_id = self._next_obj_id
+        self._next_obj_id += 1
         if inline_definition:
-            object_id = self._next_inline_obj_id
-            self._next_inline_obj_id += 1
-            # TODO: Check for 32-bit signed overflow
+            object_id = -object_id
         else:
             self._object_cache.append(item)
-            object_id = self._next_obj_id
-            self._next_obj_id += 1
 
         if not do_not_cache:
             self._object_map[item_id] = object_id
@@ -993,9 +1003,47 @@ class BinaryWriter(base.Writer):
         # TODO: Implement the write_class_instance() method
         pass
 
-    def write_class(self, fp: 'BinaryIO', value: 'ClassObject') -> None:
-        # TODO: Implement the write_class() method
-        pass
+    def write_class(self, fp: 'BinaryIO', value: 'ClassObject', object_id: int) -> None:
+        # Check if we have already written the class
+        reference_id = self._class_map.get(value, None)
+        if reference_id is not None:
+            reference_id: int
+            fp.write(enums.RecordType.ClassWithId.to_bytes(4, 'little', signed=True))
+            fp.write(object_id.to_bytes(4, 'little', signed=True))
+            fp.write(reference_id.to_bytes(4, 'little', signed=True))
+            return
+        else:
+            self._class_map[value] = object_id
+
+        fp.write(value.record_type.to_bytes(4, 'little', signed=True))
+        fp.write(object_id.to_bytes(4, 'little', signed=True))
+        self.write_string(fp, value.name)
+        member_count = len(value.members)
+        fp.write(member_count.to_bytes(4, 'little', signed=True))
+        for member in value.members:
+            self.write_string(fp, member.name)
+
+        if not value.partial:
+            extra_type_info = list()  # type: List[bytes]
+            for member in value.members:
+                bin_type = member.binary_type
+                fp.write(bin_type.to_bytes(1, 'little', signed=False))
+                if bin_type == enums.BinaryType.Primitive or bin_type == enums.BinaryType.PrimitiveArray:
+                    extra_type_info.append(member.extra_info.to_bytes(1, 'little', signed=False))
+                elif bin_type == enums.BinaryType.SystemClass:
+                    extra_type_info.append(utils.encode_multi_byte_int(len(member.extra_info)))
+                    extra_type_info.append(member.extra_info.encode('utf-8'))
+                elif bin_type == enums.BinaryType.Class:
+                    # TODO: Ensure that the library is already in the stream
+                    # TODO: Write this into the extra_type_info array
+                    pass
+            for item in extra_type_info:
+                fp.write(item)
+
+        if not value.library.system:
+            # We must have written the library prior to this call
+            lib_id = self._library_map[value.library]
+            fp.write(lib_id.to_bytes(4, 'little', signed=True))
 
     @staticmethod
     def write_date_time(fp: 'BinaryIO', value: 'DateTime') -> None:
@@ -1145,8 +1193,21 @@ class BinaryWriter(base.Writer):
         fp.write(byte_str)
 
     def write_string_array(self, fp: 'BinaryIO', value: 'StringArray') -> None:
-        # TODO: Implement the write_string_array() method
-        pass
+        fp.write(b'0x10')
+        fp.write(self.get_object_id(value).to_bytes(4, 'little', signed=True))
+        fp.write(len(value).to_bytes(4, 'little', signed=True))
+
+        null_count = 0
+        for item in value.data:
+            if item is None:
+                null_count += 1
+            else:
+                # Flush Null records
+                if null_count > 0:
+                    self.write_null_record(fp, null_count)
+                    null_count = 0
+
+                self.write_binary_string_record(fp, item)
 
     @staticmethod
     def write_time_span(fp: 'BinaryIO', value: 'TimeSpan') -> None:

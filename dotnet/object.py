@@ -1,5 +1,6 @@
 
 from abc import ABCMeta, abstractmethod
+import io
 
 import dotnet.enum as enums
 import dotnet.exceptions as exceptions
@@ -29,32 +30,21 @@ class DataStore(object):
     def __init__(self) -> None:
         self._next_lib_id = 1
         self._next_obj_id = 1
-
-        self._libraries = {-1: Library.SystemLibrary}  # type: Dict[int, Library]
-        self._classes = dict()  # type: Dict[Tuple[int, str], ClassObject]
-        self._known_metadata = dict()  # type: Dict[Tuple[int, str], List[Member]]
+        self._libraries = {hash(Library.SystemLibrary): Library.SystemLibrary}  # type: Dict[int, Library]
+        self._classes = dict()  # type: Dict[Tuple[Library, str], ClassObject]
+        self._known_metadata = dict()  # type: Dict[Tuple[Library, str], List[Member]]
 
     @property
     def libraries(self) -> 'Dict[int, Library]':
         return self._libraries
 
     @property
-    def classes(self) -> 'Dict[Tuple[int, str], ClassObject]':
+    def classes(self) -> 'Dict[Tuple[Library, str], ClassObject]':
         return self._classes
 
     @property
-    def metadata(self) -> 'Dict[Tuple[int, str], List[Member]]':
+    def metadata(self) -> 'Dict[Tuple[Library, str], List[Member]]':
         return self._known_metadata
-
-    def get_library_id(self) -> int:
-        lib_id = self._next_lib_id
-        self._next_lib_id += 1
-        return lib_id
-
-    def get_object_id(self) -> int:
-        obj_id = self._next_obj_id
-        self._next_obj_id += 1
-        return obj_id
 
 
 class Instance(dotnet.value.Value, metaclass=ABCMeta):
@@ -385,71 +375,215 @@ class StringInstance(Instance):
 
 
 class Library(object):
-    NoId = -1
+    SystemLibrary = None
 
     @staticmethod
-    def parse_string(str_value: str) -> 'Library':
-        parts = str_value.split(",")
+    def parse_specification(spec_string: str, system: bool=False) -> 'Library':
+        """Initialize a library from the given specification string
+
+        The format of a library specification string is given in MS-NRTP
+        2.2.1.3 LibraryName.
+
+        The library name format is defined as follows:
+          LibraryName: LibraryIdentifier (',' LibraryProperty)*
+          LibraryIdentifier: IDENTIFIER
+          LibraryProperty: VersionProperty | PublicKeyTokenProperty |
+                           CultureProperty | RetargetableProperty
+          CultureProperty: 'Culture=' [alpha]{1,8}('-' [alpha]{1,8})*
+          PublicKeyTokenProperty: 'PublicKeyToken=' TokenValue
+          RetargetableProperty: 'Retargetable=' ('Yes'|'No')
+          VersionProperty: 'Version=' VersionValue
+          VersionValue: uint16 '.' uint16 '.' uint16 '.' uint16
+          uint16: [digit]{1,5}
+          TokenValue: [hexdigit]{16,16} | 'null'
+
+        This means that a specification string may contain the following
+        options:
+          * Culture
+          * PublicKeyToken
+          * Retargetable
+          * Version
+        All values, if not present, are given the empty string as their
+        value.
+
+        At present, the only values which are used for equality and
+        hashing are the name and version of the library.
+
+        :param spec_string:
+        :param system:
+        """
+        parts = spec_string.split(',')
         name = parts[0].strip()
-        options = dict()  # type: Dict[str, str]
+        options = dict()
         for i in range(1, len(parts)):
             opt_parts = parts[i].split("=", 1)
-            if len(opt_parts) == 2:
-                options[opt_parts[0].strip()] = opt_parts[1].strip()
-            else:
-                raise ValueError("Failed to parse library options")
-        return Library(name, **options)
+            if len(opt_parts) != 2:
+                raise ValueError("Failed to parse library specification string")
+            options[opt_parts[0].strip()] = opt_parts[1].strip()
 
-    def __init__(self, name, **options) -> None:
+        version = options.pop('Version', '')
+        retargetable = options.pop('Retargetable', '')
+        public_key = options.pop('PublicKeyToken', '')
+        culture = options.pop('Culture', '')
+
+        if len(options.keys()) > 0:
+            raise ValueError("Unrecognized options in spec string: {}".format(
+                ', '.join(options.keys())
+            ))
+
+        return Library(name, system=system, version=version, retargetable=retargetable, culture=culture,
+                       public_key=public_key)
+
+    def __init__(self, name: str, version: str='', system: bool=False, retargetable: 'Union[str, bool]'='',
+                 culture: str='', public_key: str='') -> None:
         self._name = name
-        self._system = bool(options.pop("system", False))
-        self._options = options
-        self._library_id = options.pop("library_id", -1)
+        self._version = version
+        self._system = system
+        self._retargetable = retargetable
+        if type(retargetable) is bool:
+            self._retargetable = 'Yes' if retargetable else 'No'
+        self._culture = culture
+        self._public_key = public_key
+        self._spec = ''
+
+        self._validate()
+
+    @property
+    def culture(self) -> str:
+        return self._culture
+
+    @culture.setter
+    def culture(self, new_value: 'Optional[str]') -> None:
+        value = '' if new_value is None else str(new_value)
+        if value != '':
+            parts = value.split('-')
+            for part in parts:
+                len_part = len(part)
+                if len_part < 1 or len_part > 8 or not part.isalpha():
+                    raise ValueError("Invalid Culture format")
+
+        if value != self._culture:
+            self._spec = ''
+        self._culture = value
 
     @property
     def name(self) -> str:
         return self._name
 
     @property
+    def public_key(self) -> str:
+        return self._public_key
+
+    @public_key.setter
+    def public_key(self, new_value: 'Optional[str]') -> None:
+        value = '' if new_value is None else str(new_value)
+
+        if value != '':
+            # Validate the public key
+            _ = int(value, 16)
+
+        if value != self._public_key:
+            self._spec = ''
+        self._public_key = value
+
+    @property
+    def retargetable(self) -> str:
+        return self._retargetable
+
+    @retargetable.setter
+    def retargetable(self, new_value: 'Union[bool, str, None]') -> None:
+        value_type = type(new_value)
+        if value_type is bool:
+            new_value = 'Yes' if new_value else 'No'
+            value_type = str
+        elif new_value is None:
+            new_value = ''
+            value_type = str
+
+        if value_type is str:
+            if new_value not in ('', 'Yes', 'No'):
+                raise ValueError("Retargetable property requires one of '', 'Yes', or 'No'")
+            if new_value != self._retargetable:
+                self._spec = ''
+            self._retargetable = new_value
+        else:
+            raise TypeError("Retargetable property expects one of str, bool, or None")
+
+    @property
+    def spec(self) -> str:
+        if self._spec == '':
+            self._spec = self._get_str()
+        return self._spec
+
+    @property
     def system(self) -> bool:
         return self._system
 
     @property
-    def options(self) -> 'Dict[str, str]':
-        return self._options
+    def version(self) -> str:
+        return self._version
 
-    @property
-    def id(self) -> int:
-        return self._library_id
+    def __eq__(self, other: 'Any') -> bool:
+        if type(other) is Library:
+            return self.name == other.name and self.version == other.version
+        return False
 
-    @id.setter
-    def id(self, new_id: int) -> None:
-        if self._library_id != -1:
-            raise RuntimeError("Can not set the library id multiple times")
-        self._library_id = new_id
+    def __ne__(self, other: 'Any') -> bool:
+        return not self.__eq__(other)
 
-    def __getitem__(self, key: str) -> str:
-        return self._options[key]
+    def __hash__(self) -> int:
+        return hash((self.name, self.version))
 
     def __str__(self) -> str:
-        options = [self._name]
-        for key, value in self._options.items():
-            options.append("{}={}".format(key, repr(value)))
-        return "[{}]".format(", ".join(options))
+        return self.spec
 
     def __repr__(self) -> str:
-        options = [self._name]
-        for key, value in self._options.items():
-            options.append("{}={}".format(key, repr(value)))
-        if self._system:
-            options.append("system=True")
-        if self._library_id != -1:
-            options.append("library_id={}".format(self._library_id))
+        if self.system:
+            return "Library({}, system=True)".format(self.spec)
+        return "Library({})".format(self.spec)
 
-        return "Library({})".format(", ".join(options))
+    def _validate(self) -> None:
+        if self._version != '':
+            version_parts = self._version.split('.')
+            if len(version_parts) != 4:
+                raise ValueError("Invalid Version format")
+            for part in version_parts:
+                part_val = int(part)
+                if part_val < 0 or part_val >= 65536:
+                    raise ValueError('Invalid Version value')
+
+        if self._retargetable not in ('', 'Yes', 'No'):
+            raise ValueError("Invalid Retargetable value; must be one of '', 'Yes', or 'No'")
+
+        if self._culture != '':
+            culture_parts = self._culture.split('-')
+            for part in culture_parts:
+                len_part = len(part)
+                if len_part < 1 or len_part > 8 or not part.isalpha():
+                    raise ValueError("Invalid Culture format")
+
+        if self._public_key != '' and self._public_key != 'null':
+            _ = int(self._public_key, 16)
+
+    def _get_str(self) -> str:
+        sb = io.StringIO()
+        sb.write(self._name)
+        if self._version != '':
+            sb.write(', Version=')
+            sb.write(self._version)
+        if self._culture != '':
+            sb.write(', Culture=')
+            sb.write(self._culture)
+        if self._public_key != '':
+            sb.write(', PublicKeyToken=')
+            sb.write(self._public_key)
+        if self._retargetable != '':
+            sb.write(', Retargetable=')
+            sb.write(self._retargetable)
+        return sb.getvalue()
 
 
-Library.SystemLibrary = Library("System", system=True, library_id=-1)
+Library.SystemLibrary = Library("System", system=True)
 
 
 class ClassObject(object):
@@ -471,7 +605,7 @@ class ClassObject(object):
         self._library = library
         self._value_type = False
         self._data_store = data_store if data_store is not None else DataStore.get_global()
-        self._lookup = dict()  # Dict[str, Member]
+        self._lookup = dict()  # type: Dict[str, Member]
         for member in self._members:
             self._lookup[member.name] = member
 
@@ -488,10 +622,6 @@ class ClassObject(object):
         return self._library
 
     @property
-    def library_id(self) -> int:
-        return self._library.id
-
-    @property
     def partial(self) -> bool:
         return self._partial
 
@@ -504,12 +634,12 @@ class ClassObject(object):
         self._value_type = bool(is_value_type)
 
     @property
-    def key(self) -> 'Tuple[int, str]':
-        return self._library.id, self._name
+    def key(self) -> 'Tuple[Library, str]':
+        return self._library, self._name
 
     @property
     def record_type(self) -> 'enums.RecordType':
-        if self.library_id == -1:
+        if self.library.system:
             if self.partial:
                 return enums.RecordType.SystemClassWithMembers
             return enums.RecordType.SystemClassWithMembersAndTypes
