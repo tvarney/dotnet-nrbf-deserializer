@@ -507,6 +507,16 @@ class ClassObject(object):
     def key(self) -> 'Tuple[int, str]':
         return self._library.id, self._name
 
+    @property
+    def record_type(self) -> 'enums.RecordType':
+        if self.library_id == -1:
+            if self.partial:
+                return enums.RecordType.SystemClassWithMembers
+            return enums.RecordType.SystemClassWithMembersAndTypes
+        if self.partial:
+            return enums.RecordType.ClassWithMembers
+        return enums.RecordType.ClassWithMembersAndTypes
+
     def get_member(self, member_name: str) -> 'Member':
         return self._lookup[member_name]
 
